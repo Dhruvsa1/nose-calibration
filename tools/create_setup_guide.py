@@ -38,11 +38,13 @@ def screenshot(name, top, height):
     c.drawImage(image, (W-width)/2, top-height, width, height)
 
 page(1, 'Open it. Start when ready.', 'Windows 10/11, 64-bit. No coding setup is needed to run the collector.')
-y = text('<b>1. Extract the download.</b> Right-click the ZIP and choose <b>Extract All</b>. Open the extracted NoseCalibration folder. Keep its files together.', 642)
-y = text('<b>2. Open NoseCalibration.exe.</b> You do not need Python, .NET, or developer tools. The optional Install.ps1 creates a Start menu shortcut; running the EXE directly is enough.', y)
-y = text('<b>3. Read the notice and start.</b> Check the consent box, then choose <b>Start session</b>. Recording is off until you do this. Maximize the window for more room.', y)
-screenshot('overview.png', 426, 287)
-text('The question overview. Choose <b>Solve</b> to open a question. The top bar shows when recording is active and includes <b>Stop recording</b>.', 121, small)
+y = text('<b>Check the ZIP before opening.</b> In PowerShell, replace the quoted path below with your downloaded ZIP:<br/><font face="Courier" size="9">Get-FileHash -Algorithm SHA256 "C:/path/to/download.zip"</font><br/>Compare the Hash with the organizer\'s SHA-256 published through a <b>separate channel</b>, such as the study announcement. If it differs or no value is published, stop and contact the organizer. The accompanying .sha256 file and package manifests do not prove who built the download.', 650, small)
+y = text('<b>1. Extract the entire ZIP.</b> Choose <b>Extract All</b> into a new, empty folder you own. Keep all files together.', y)
+y = text('<b>2. Open NoseCalibration.exe.</b> No Python, .NET installation or developer tools are needed.', y)
+y = text('<b>Optional Start shortcut:</b> right-click <b>Install.ps1</b> and choose <b>Run with PowerShell</b>. Keep the window open until it reports <b>Installed Nose Calibration</b> or <b>Nose Calibration was NOT installed</b>; read the result, then press Enter to close. It checks files against package-files.json before copying. No administrator access is needed. If the script will not run, skip it and run the EXE directly; do not change execution policy.', y, small)
+y = text('<b>3. Read the notice and start.</b> Check consent, then choose <b>Start session</b>. Recording stays off until then.', y)
+screenshot('overview.png', y-2, 260)
+text('Choose <b>Solve</b> to open a question. The top bar includes <b>Stop recording</b>.<br/><b>Unsigned preview:</b> if Windows warns or you are unsure, stop and contact the organizer. Do not disable security software.', y-277, small)
 c.showPage()
 
 page(2, 'Take the practice test.', 'Work naturally. For human calibration, your interaction patterns matter more than your score.')

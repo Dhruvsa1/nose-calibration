@@ -4,5 +4,6 @@
   "researcherLogin": "Dhruvsa1",
   "githubAppClientId": "Iv23li4JwAA8Kc5EWiCM",
   "githubAppId": 5167786,
-  "githubAppSlug": "nose-calibration"
+  "githubAppSlug": "nose-calibration",
+  "minimumBundledRuntime": "8.0.31"
 }

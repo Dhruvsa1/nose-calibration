@@ -1,6 +1,15 @@
 NOSE CALIBRATION — WINDOWS x64
 
-1. Extract the entire ZIP into a folder you own.
+Before extracting, check the download. In PowerShell run:
+   Get-FileHash -Algorithm SHA256 <path to the downloaded ZIP>
+Compare the Hash with the SHA-256 the organizer published for this package,
+through a channel separate from the download (for example the study
+announcement). If they differ, or no published value exists, do not open the
+package; contact the organizer. A .sha256 file downloaded next to the ZIP, and
+package-files.json inside it, only detect damage: anyone who changed the package
+could change them too. package-source.json names the version and source revision.
+
+1. Extract the entire ZIP into a new, empty folder you own.
 2. Open NoseCalibration.exe. Keep all files together.
 3. Read the recording notice, check consent, and choose Start session.
 4. Work through the practice questions normally. Answer accuracy is optional for human calibration.
@@ -21,10 +30,18 @@ Microsoft Edge WebView2 Runtime is required; it is commonly already installed.
 If the app reports it missing, obtain it from Microsoft's official WebView2 download page.
 No Python, developer tools, GitHub CLI, or .NET installation is required.
 
+This package is not code-signed. Windows may warn before opening it. If you are
+unsure, stop and contact the organizer. Do not disable security software.
+
 Optional: Install.ps1 copies the extracted app into your per-user Programs folder
-and creates a Start menu shortcut. It does not need administrator access.
-You can run the app directly without this script. Do not change machine-wide
-PowerShell execution policy or disable security software to install it.
+and creates a Start menu shortcut. It does not need administrator access and adds
+no startup entry. To use it, right-click Install.ps1 and choose Run with PowerShell;
+the window shows the result and waits for Enter. It first checks every file
+against package-files.json and stops, changing nothing, if a file is missing,
+altered or extra. Each run installs into a new folder; earlier installs are kept.
+You can run the app directly without this script. If Windows does not run the
+script, skip it. Do not change PowerShell execution policy or disable security
+software to install it.
 
 Recording is limited to the focused practice interface. It includes pointer,
 click, keyboard and scroll events, answers, and throttled page screenshots.
