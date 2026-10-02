@@ -2,9 +2,52 @@
 (() => {
  const $=id=>document.getElementById(id), native=window.chrome?.webview;
  let grading=false, finishing=false, revision=0, sessionId='', signedIn=false, adminEdition=false;
+ let adminBusy=false,intakeBusy=false,intakeRunning=false,intakePending=null;
  let running=false, mode='human', current=0, seq=0, started=0, batch=[], answers=questions.map(q=>q.starter||''), grades={}, count=0;
  const post=(command,extra={})=>native?.postMessage({command,...extra});
  const toast=message=>{$('toast').textContent=message;};
+ function updateIntakeControls(){
+  const blocked=!adminEdition||adminBusy||running||intakeBusy;
+  for(const id of ['intake-refresh','intake-catchup'])$(id).disabled=blocked;
+  $('intake-start').disabled=blocked||intakeRunning;
+  $('intake-stop').disabled=!adminEdition||!intakeRunning;
+  for(const button of $('intake-queue').querySelectorAll('button'))button.disabled=blocked;
+ }
+ function requestIntake(command,extra={}){
+  if(!adminEdition||((running||adminBusy||intakeBusy)&&command!=='stop'))return;
+  intakePending=command;intakeBusy=true;updateIntakeControls();$('intake-status').textContent=command==='stop'?'Stopping collection…':'Working…';
+  post('intake-'+command,extra);
+ }
+ function intakeResult(data,stream=false){
+  const expected=intakePending==='start'?'run':intakePending;
+  const acknowledged=!!expected&&data?.command===expected&&(!stream||intakePending==='start');
+  if(!stream&&!acknowledged)return;
+  if(acknowledged){intakePending=null;intakeBusy=false;}
+  if(!data||data.schemaVersion!==1||typeof data.command!=='string'){ $('intake-status').textContent='Could not read collection status.';updateIntakeControls();return; }
+  if(data.ok!==true){
+   const messages={setup_required:'Organizer setup is not initialized. Choose Check invitations, Collect now, or Start collection to verify the organizer account and initialize it.',organizer_account_mismatch:'GitHub is signed in to a different account. Sign the GitHub CLI in to the organizer account Dhruvsa1, then try again.',organizer_github_unavailable:'Could not verify the organizer GitHub account. Check the GitHub CLI sign-in and connection, then try again.',invalid_organizer_setup:'The existing organizer setup is invalid or belongs to a different account. It was not changed. Ask the organizer to repair the local setup.',python_unavailable:'The Admin Python runtime is unavailable.',intake_busy:'Another collection action is still running.',recording_active:'Stop the practice session before changing collection settings.',intake_unavailable:'The private collection components are unavailable.',worker_not_owned_by_this_window:'This collection worker was started elsewhere. Stop it from that window or terminal.',worker_already_running:'Automatic collection is already running.',intake_unavailable_or_failed:'Collection could not start. Check the private runtime and organizer GitHub sign-in.',intake_stop_failed:'Collection could not be stopped. Close this Admin window to stop its worker.'};
+   $('intake-status').textContent=messages[data.error]||'Collection could not complete. Check the organizer GitHub sign-in and try again.';updateIntakeControls();return;
+  }
+  if(typeof data.running==='boolean')intakeRunning=data.running;
+  if(Number.isSafeInteger(data.approvedOwnerCount)&&data.approvedOwnerCount>=0)$('intake-approved-count').textContent=String(data.approvedOwnerCount);
+  if(data.command==='queue'){
+   const list=$('intake-queue');list.replaceChildren();const seen=new Set();
+   for(const participant of (Array.isArray(data.participants)?data.participants:[]).slice(0,200)){
+    if(!Number.isSafeInteger(participant.ownerId)||participant.ownerId<=0||typeof participant.ownerLogin!=='string'||!/^[-a-zA-Z0-9]{1,39}$/.test(participant.ownerLogin)||seen.has(participant.ownerId))continue;
+    if(!['approved','approval_required'].includes(participant.eligibility))continue;seen.add(participant.ownerId);
+    const row=document.createElement('div'),identity=document.createElement('span'),button=document.createElement('button');row.className='intake-participant';identity.className='intake-identity';identity.textContent=participant.ownerLogin+' · GitHub ID '+participant.ownerId;
+    const approved=participant.eligibility==='approved';button.className='intake-approve';button.type='button';button.textContent=approved?'Revoke approval':'Approve';button.setAttribute('aria-label',button.textContent+' '+participant.ownerLogin);button.onclick=()=>requestIntake(approved?'revoke':'approve',{ownerId:participant.ownerId});row.append(identity,button);list.append(row);
+   }
+   $('intake-status').textContent=data.truncated?'Showing a limited invitation list. Check again after processing.':'Invitation check complete.';
+  }else if(data.command==='status')$('intake-status').textContent=(intakeRunning?'Automatic collection is running.':'Automatic collection is stopped.')+' '+(Number.isSafeInteger(data.approvedOwnerCount)?data.approvedOwnerCount+' approved accounts.':'');
+  else if(data.command==='run')$('intake-status').textContent='Automatic collection is running.';
+  else if(data.command==='stop')$('intake-status').textContent=data.stopRequested&&data.running?'Stopping collection…':'Collection stopped.';
+  else if(data.command==='catchup')$('intake-status').textContent='Collection check finished. '+(Number.isSafeInteger(data.ingested)?data.ingested+' submissions processed.':'');
+  else $('intake-status').textContent='Participant approval updated.';
+  updateIntakeControls();
+  if(acknowledged&&['approve','revoke'].includes(data.command))requestIntake('queue');
+  else if(acknowledged&&['queue','catchup'].includes(data.command)&&!intakeRunning)requestIntake('status');
+ }
  function page(id){for(const name of ['welcome','overview','workspace','results'])$(name).hidden=name!==id;}
  function event(type,extra={}) { if(!running||!document.hasFocus()||document.hidden)return; batch.push({id:++seq,type,t:Math.round((performance.now()-started)*100)/100,question:questions[current].id,viewport:{width:innerWidth,height:innerHeight,scale:devicePixelRatio},...extra});count++; if(batch.length>=100)flush();return seq; }
  function flush(){if(batch.length){post('events',{events:batch.splice(0,512)});}}
@@ -37,8 +80,14 @@
   return await new Promise(resolve=>{const worker=new Worker('grader.js');let ended=false;const done=r=>{if(ended)return;ended=true;clearTimeout(timer);worker.terminate();resolve(r);};const timer=setTimeout(()=>done({passed:false,message:'Execution timed out after 2 seconds.'}),2000);worker.onmessage=e=>{const r=e.data;done({passed:r?.passed===true,message:String(r?.message||'Invalid result').slice(0,4000)});};worker.onerror=()=>done({passed:false,message:'Code could not run. Check syntax.'});worker.postMessage({source:answers[i],fn:q.fn,tests:q.tests});});
  }
  async function check(){if(!running||grading||finishing)return;grading=true;save();$('test-output').textContent='Running checks…';const i=current,requestRevision=revision;try{const result=await grade(i);if(!running||finishing||revision!==requestRevision)return;grades[i]=result;if(i===current)$('test-output').textContent=result.message;event('grade',{index:i,passed:result.passed});}finally{grading=false;}}
+ const snapshot=()=>({values:answers,grades,score:Object.values(grades).filter(g=>g.passed).length,total:questions.length,grading:'client-reported; not evidence of authentic human activity'});
+ function hostStopped(){
+  // Native Stop has already revoked capture. Preserve current answers without
+  // executing code or restarting capture; stale grading replies cannot mutate it.
+  if(running){save();running=false;revision++;finishing=false;batch=[];post('finalized',{sessionId,answers:snapshot()});}
+  results();
+ }
  async function finish(gradeAll=true){if(!running)return;finishing=true;const finishRevision=++revision,finishedSession=sessionId;save();flush();running=false;
-  const snapshot=()=>({values:answers,grades,score:Object.values(grades).filter(g=>g.passed).length,total:questions.length,grading:'client-reported; not evidence of authentic human activity'});
   // Revoke native capture before waiting for any participant code to execute.
   post('finish',{answers:snapshot()});results();
   try{if(gradeAll){for(let i=0;i<questions.length;i++){const result=await grade(i);if(revision!==finishRevision)return;grades[i]=result;}post('finalized',{sessionId:finishedSession,answers:snapshot()});results();}}
@@ -54,16 +103,18 @@
  $('sign-in').onclick=()=>{$('sign-in').disabled=true;post('signin');};$('sign-out').onclick=()=>post('signout');$('share-session').disabled=true;$('share-consent').onchange=updateSharing;$('share-session').onclick=()=>{if(signedIn&&!finishing&&$('share-consent').checked)post('share',{consent:true});};$('export-session').onclick=()=>{if(!finishing)post('export');};$('new-session').onclick=()=>{revision++;finishing=false;answers=questions.map(q=>q.starter||'');grades={};current=0;page('welcome');$('consent').checked=false;$('start-session').disabled=true;post('list-sessions');};
  $('refresh-sessions').onclick=()=>post('list-sessions');$('saved-session').onchange=()=>{$('load-session').disabled=!$('saved-session').value;};$('load-session').onclick=()=>{const id=$('saved-session').value;if(/^[a-f0-9]{32}$/.test(id))post('load-session',{sessionId:id});};
  $('admin-run').onclick=()=>{if(adminEdition&&!running&&!finishing){$('admin-run').disabled=true;post('admin-start',{model:$('admin-model').value,effort:$('admin-effort').value,prompt:$('admin-prompt').value});}};
+ $('intake-refresh').onclick=()=>requestIntake('queue');$('intake-catchup').onclick=()=>requestIntake('catchup');$('intake-start').onclick=()=>requestIntake('start');$('intake-stop').onclick=()=>requestIntake('stop');
  $('admin-stop').onclick=$('admin-stop-active').onclick=()=>{if(adminEdition)post('admin-stop');};
  native?.addEventListener('message',e=>{const m=e.data;
   if(m.kind==='started')resetSharing();
-  if(m.kind==='edition'){adminEdition=m.mode==='admin';$('admin-controls').hidden=!adminEdition;}
-  if(m.kind==='admin-status'&&adminEdition){$('admin-status').textContent=m.message||'';$('admin-run').disabled=m.running===true;$('admin-stop').disabled=m.running!==true;$('admin-stop-active').hidden=m.running!==true;}
+  if(m.kind==='edition'){adminEdition=m.mode==='admin';$('admin-controls').hidden=!adminEdition;updateIntakeControls();}
+  if(m.kind==='admin-status'&&adminEdition){adminBusy=m.running===true;$('admin-status').textContent=m.message||'';$('admin-run').disabled=adminBusy;$('admin-stop').disabled=!adminBusy;$('admin-stop-active').hidden=!adminBusy;updateIntakeControls();}
+  if(m.kind==='intake-result'&&adminEdition)intakeResult(m.data,m.stream===true);
   if(m.kind==='account'){signedIn=typeof m.login==='string'&&!!m.login;$('github-account').textContent=signedIn?'Signed in to GitHub as '+m.login:'Not signed in to GitHub';$('sign-in').disabled=false;updateSharing();}
   if(m.kind==='error')$('sign-in').disabled=false;
   if(m.kind==='sessions'){const select=$('saved-session');select.replaceChildren();const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Choose an earlier recording';select.append(placeholder);for(const s of m.sessions||[]){if(!/^[a-f0-9]{32}$/.test(s.id))continue;const option=document.createElement('option');option.value=s.id;option.textContent=(s.startedAt||s.id)+' · '+s.mode;select.append(option);}$('load-session').disabled=true;}
   if(m.kind==='loaded'){revision++;finishing=false;sessionId=m.sessionId;mode=m.mode;count=Number(m.events)||0;grades=m.answers?.grades&&typeof m.answers.grades==='object'?m.answers.grades:{};$('receipt').textContent='';$('share-consent').checked=false;results();}
  });
- native?.addEventListener('message',e=>{const m=e.data;if(m.kind==='started'){sessionId=m.sessionId||'';revision++;finishing=false;running=true;mode=m.mode;started=performance.now();seq=count=0;batch=[];$('recording-status').textContent='Recording this test only';$('recording-status').dataset.state='recording';tasks();page('overview');}else if(m.kind==='stopped')results();else if(m.kind==='notice'||m.kind==='error')toast(m.message);else if(m.kind==='receipt'){$('receipt').textContent='Submitted successfully: '+m.url;}else if(m.kind==='admin-start'){answers=questions.map(q=>q.starter||'');grades={};post('admin-record-ready',{startId:m.startId});}});
+ native?.addEventListener('message',e=>{const m=e.data;if(m.kind==='started'){sessionId=m.sessionId||'';revision++;finishing=false;running=true;mode=m.mode;started=performance.now();seq=count=0;batch=[];$('recording-status').textContent='Recording this test only';$('recording-status').dataset.state='recording';tasks();page('overview');}else if(m.kind==='stopped')hostStopped();else if(m.kind==='notice'||m.kind==='error')toast(m.message);else if(m.kind==='receipt'){$('receipt').textContent='Submitted successfully: '+m.url;}else if(m.kind==='admin-start'){answers=questions.map(q=>q.starter||'');grades={};post('admin-record-ready',{startId:m.startId});}});
  post('ready');
 })();

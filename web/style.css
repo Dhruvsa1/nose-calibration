@@ -380,22 +380,71 @@ body:has(#welcome:not([hidden])) .app-main { height: 100%; }
 #start-session { min-width: 150px; background: #5bd47c; color: #08160d; }
 #start-session:hover:not(:disabled) { background: #6fe08d; }
 
-/* Admin edition: Codex practice run. Shown by app.js only when the host edition is admin;
-   the landing panel above shrinks and scrolls to make room. */
+/* Admin edition: Codex practice run and participant Submissions, switched by tabs in ui.js.
+   Shown by app.js only when the host edition is admin; the landing panel above shrinks and
+   scrolls to make room. */
 .admin {
   flex: none;
-  margin-top: 16px; padding: 12px 16px 14px;
+  container-type: inline-size;
+  margin-top: 16px; padding: 0 16px 14px;
   border: 1px solid rgba(231, 182, 92, 0.2); border-left: 3px solid var(--amber); border-radius: 4px 10px 10px 4px;
   background: linear-gradient(90deg, rgba(231, 182, 92, 0.07), rgba(0, 0, 0, 0.18) 45%);
 }
-.admin-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Title strip: the tabs stand on the amber hairline; the selected one is underlined in amber. */
+.admin-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0 10px;
+  min-height: 42px; margin: 0 -16px 12px; padding: 0 6px 0 16px;
+  border-bottom: 1px solid rgba(231, 182, 92, 0.16);
+}
 .admin-title { margin: 0; font-size: 14px; font-weight: 600; color: #fff; }
 .admin-tag {
   padding: 1px 7px;
   border: 1px solid rgba(231, 182, 92, 0.45); border-radius: 3px;
   color: var(--amber); font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
 }
-.admin-fill { flex: 1; }
+.admin-tabs { display: flex; align-self: stretch; margin-left: auto; }
+.admin-tab {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 42px; padding: 0 12px;
+  border: 0; background: none;
+  color: #9aa0a3; font-size: 12.5px; font-weight: 600; letter-spacing: 0.01em;
+  transition: color 120ms ease;
+}
+.admin-tab::before {
+  content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px;
+  border-radius: 2px 2px 0 0; background: var(--amber);
+  transform: scaleX(0); transition: transform 160ms ease;
+}
+.admin-tab:hover { color: #e6e8e6; }
+.admin-tab[aria-selected="true"] { color: #fff; }
+.admin-tab[aria-selected="true"]::before { transform: scaleX(1); }
+.admin-tab:focus-visible { outline: 2px solid var(--amber); outline-offset: -6px; border-radius: 8px; }
+/* A live dot on a tab whose work is running, so it stays noticeable from the other tab. */
+.admin:has(#admin-stop:not(:disabled)) #admin-tab-codex::after,
+.admin:has(#intake-stop:not(:disabled)) #admin-tab-intake::after {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--amber); box-shadow: 0 0 0 3px rgba(231, 182, 92, 0.16);
+  animation: admin-live 1.6s ease-in-out infinite;
+}
+@keyframes admin-live { 50% { opacity: 0.35; } }
+
+.admin-panel { animation: admin-panel-in 180ms ease-out; }
+@keyframes admin-panel-in { from { opacity: 0; transform: translateY(3px); } }
+/* The tab names each panel; the panel headings stay for screen readers, and show only when
+   ui.js is absent and both panels are stacked. */
+.admin-panel-title { margin: 0; font-size: 13px; font-weight: 600; color: #e6e8e6; }
+.admin-head .admin-panel-title { margin-right: auto; }
+.intake > .admin-panel-title { margin-bottom: 10px; }
+.admin:has(.admin-tabs:not([hidden])) .admin-panel-title {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.admin:has(.admin-tabs[hidden]) .admin-panel + .admin-panel {
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(231, 182, 92, 0.16);
+}
+
+.admin-head { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
 .admin-field { display: inline-flex; align-items: center; gap: 7px; }
 .admin-label { color: #9aa0a3; font-size: 12px; }
 .admin-select {
@@ -442,6 +491,100 @@ body:has(#welcome:not([hidden])) .app-main { height: 100%; }
 .admin-stop:not(:disabled) { border-color: #8c3a3c; color: #ff8a8e; }
 .admin-stop:hover:not(:disabled) { border-color: var(--red); background: var(--red-wash); }
 .admin:has(#admin-stop:not(:disabled)) .admin-status { color: var(--amber); }
+
+/* Submissions: explanation on the left, status, pending queue and controls on the right.
+   The parent fills #intake-queue with .intake-participant rows at runtime. */
+.intake-grid {
+  display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr); gap: 0 22px;
+  align-items: start;
+}
+.intake-terms li + li { margin-top: 4px; }
+.intake-work { min-width: 0; padding-left: 20px; border-left: 1px solid rgba(255, 255, 255, 0.07); }
+.intake-meta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 14px; }
+.intake-status {
+  display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0;
+  color: #c8cdcf; font-size: 12.5px;
+}
+.intake-status::before {
+  content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: #5d6266; transform: translateY(-1px);
+}
+.admin:has(#intake-stop:not(:disabled)) .intake-status { color: var(--amber); }
+.admin:has(#intake-stop:not(:disabled)) .intake-status::before {
+  background: var(--amber); animation: admin-live 1.6s ease-in-out infinite;
+}
+.intake-count { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+.intake-count-label {
+  color: #9aa0a3; font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+}
+.intake-count-num {
+  min-width: 2.6em; padding: 1px 8px;
+  border: 1px solid rgba(231, 182, 92, 0.32); border-radius: 4px;
+  background: rgba(231, 182, 92, 0.06);
+  color: #f3dcae; font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.intake-queue-title {
+  margin: 12px 0 6px;
+  color: #9aa0a3; font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+}
+.intake-queue {
+  display: flex; flex-direction: column;
+  max-height: 184px; overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px;
+  background: rgba(0, 0, 0, 0.26);
+  scrollbar-color: #5c6166 transparent;
+}
+.intake-queue:empty { display: none; }
+.intake-queue:not(:empty) + .intake-empty { display: none; }
+.intake-empty {
+  margin: 0; padding: 10px 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.14); border-radius: 6px;
+  color: #9aa0a3; font-size: 12.5px; line-height: 1.45;
+}
+.intake-participant {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px;
+  flex: none; min-height: 44px; padding: 6px 8px 6px 12px;
+  color: #b8bdbf; font-size: 12px;
+}
+.intake-participant + .intake-participant { border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.intake-participant:hover { background: rgba(255, 255, 255, 0.03); }
+.intake-identity {
+  flex: 1 1 12em; min-width: 0;
+  color: #eef0ee; font-family: var(--font-mono); font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.intake-approve {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  height: 30px; margin-left: auto; padding: 0 12px;
+  border: 1px solid rgba(231, 182, 92, 0.55); border-radius: 6px;
+  background: none; color: var(--amber);
+  font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.intake-approve:hover:not(:disabled) { background: rgba(231, 182, 92, 0.13); color: #f6dfb2; }
+.intake-approve:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+.intake-approve:disabled { border-color: var(--line-strong); color: #7b7b78; cursor: not-allowed; }
+
+.intake-foot { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.intake-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.intake-actions-fill { flex: 1; }
+.intake-btn { height: 34px; }
+.intake-actions .btn-outline:not(.admin-stop) { background: rgba(0, 0, 0, 0.2); }
+.intake-actions .btn:focus-visible { outline-color: var(--amber); }
+.intake-keys { margin: 8px 0 0; color: #9aa0a3; font-size: 12px; line-height: 1.5; }
+.intake-keys strong { color: #c8cdcf; font-weight: 600; }
+
+@container (max-width: 640px) {
+  .intake-grid { grid-template-columns: minmax(0, 1fr); }
+  .intake-work { margin-top: 12px; padding: 12px 0 0; border-left: 0; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+}
+@container (max-width: 470px) {
+  .admin-tabs { margin-left: -12px; }
+  .intake-actions-fill { display: none; }
+  .intake-btn { flex: 1 1 auto; }
+}
 #start-session:disabled { background: #3a3f44; color: #8b9196; }
 
 /* Custom checkbox */
@@ -1146,8 +1289,6 @@ body { display: flex; flex-direction: column; }
   .workspace:has(#toggle-expand:checked) { grid-template-columns: 52px 44px 0 minmax(0, 1fr); }
   .lang-select { width: 168px; }
   .lang-pop { left: auto; right: 16px; }
-  .admin-fill { flex-basis: 100%; height: 0; }
-  .admin-head { row-gap: 8px; gap: 8px 14px; }
   .admin-foot { flex-direction: column; align-items: stretch; gap: 8px; }
   .admin-actions { display: flex; align-items: center; justify-content: flex-end; }
   .admin-status { flex: 1; max-width: none; text-align: left; }

@@ -11,6 +11,32 @@
  if ($('question-nav')) new MutationObserver(markRail).observe($('question-nav'), { childList: true });
  const currentQuestion = () => { const t = $('problem')?.querySelector('h1')?.textContent; return qs.find(q => q.title === t); };
 
+ // Admin controls: tabs between the Codex practice run and Submissions. Only [hidden] changes,
+ // so the typed Codex instructions, selections and runtime queue rows survive switching.
+ const tablist = document.querySelector('#admin-controls .admin-tabs');
+ const tabs = tablist ? [...tablist.querySelectorAll('[role="tab"]')] : [];
+ if (tabs.length) {
+  const select = (tab, focus) => {
+   tabs.forEach(t => {
+    const on = t === tab, panel = $(t.getAttribute('aria-controls'));
+    t.setAttribute('aria-selected', String(on));
+    t.tabIndex = on ? 0 : -1;
+    if (panel) panel.hidden = !on;
+   });
+   if (focus) tab.focus();
+  };
+  tablist.addEventListener('click', e => { const t = e.target.closest('[role="tab"]'); if (t) select(t); });
+  tablist.addEventListener('keydown', e => {
+   const i = tabs.indexOf(document.activeElement);
+   const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+   if (i < 0 || to === undefined || e.altKey || e.ctrlKey || e.metaKey) return;
+   e.preventDefault();
+   select(tabs[(to + tabs.length) % tabs.length], true);
+  });
+  tablist.hidden = false;
+  select(tabs.find(t => t.getAttribute('aria-selected') === 'true') || tabs[0]);
+ }
+
  // Overview: move Coding rows from the single list app.js renders into the Coding section.
  const basics = $('task-list'), coding = $('task-list-coding');
  if (basics && coding && qs.length) {

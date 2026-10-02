@@ -203,45 +203,98 @@
              Hidden static markup is not a security boundary; the public collector host has no
              Codex implementation behind these controls. -->
         <section id="admin-controls" class="admin" aria-labelledby="admin-title" hidden>
-          <div class="admin-head">
-            <h2 id="admin-title" class="admin-title">Codex practice run</h2>
+          <div class="admin-bar">
+            <h2 id="admin-title" class="admin-title">Admin controls</h2>
             <span class="admin-tag">Admin edition</span>
-            <span class="admin-fill"></span>
-            <label class="admin-field">
-              <span class="admin-label">Model</span>
-              <select id="admin-model" class="admin-select">
-                <option value="gpt-6-astra" selected>gpt-6-astra</option>
-                <option value="gpt-5.6-sol">gpt-5.6-sol</option>
-                <option value="gpt-5.6-terra">gpt-5.6-terra</option>
-                <option value="gpt-5.6-luna">gpt-5.6-luna</option>
-                <option value="gpt-5.5">gpt-5.5</option>
-              </select>
-            </label>
-            <label class="admin-field">
-              <span class="admin-label">Effort</span>
-              <select id="admin-effort" class="admin-select">
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high" selected>High</option>
-                <option value="xhigh">Extra high</option>
-              </select>
-            </label>
+            <!-- ui.js unhides the tabs and shows one panel at a time. Without it both panels stay
+                 visible in order. Switching only toggles [hidden], so typed text and rows persist. -->
+            <div class="admin-tabs" role="tablist" aria-labelledby="admin-title" hidden>
+              <button id="admin-tab-codex" class="admin-tab" type="button" role="tab" aria-selected="true" aria-controls="admin-panel-codex">Codex practice</button>
+              <button id="admin-tab-intake" class="admin-tab" type="button" role="tab" aria-selected="false" aria-controls="admin-panel-intake" tabindex="-1">Submissions</button>
+            </div>
           </div>
 
-          <label class="visually-hidden" for="admin-prompt">Instructions for Codex</label>
-          <textarea id="admin-prompt" class="admin-prompt" rows="2" spellcheck="false" aria-describedby="admin-terms">Complete all five practice questions correctly. Use the personalized input tools and inspect results. Get 5/5.</textarea>
+          <div id="admin-panel-codex" class="admin-panel" role="tabpanel" aria-labelledby="admin-tab-codex">
+            <div class="admin-head">
+              <h3 class="admin-panel-title">Codex practice run</h3>
+              <label class="admin-field">
+                <span class="admin-label">Model</span>
+                <select id="admin-model" class="admin-select">
+                  <option value="gpt-6-astra" selected>gpt-6-astra</option>
+                  <option value="gpt-5.6-sol">gpt-5.6-sol</option>
+                  <option value="gpt-5.6-terra">gpt-5.6-terra</option>
+                  <option value="gpt-5.6-luna">gpt-5.6-luna</option>
+                  <option value="gpt-5.5">gpt-5.5</option>
+                </select>
+              </label>
+              <label class="admin-field">
+                <span class="admin-label">Effort</span>
+                <select id="admin-effort" class="admin-select">
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high" selected>High</option>
+                  <option value="xhigh">Extra high</option>
+                </select>
+              </label>
+            </div>
 
-          <div class="admin-foot">
-            <ul id="admin-terms" class="admin-terms">
-              <li>Local practice only. Nothing starts until you press <strong>Start Codex practice</strong>.</li>
-              <li>Needs the official Codex login.</li>
-              <li>While it runs, your instructions and practice-window screenshots are sent to OpenAI.</li>
-              <li>Codex's mouse and keyboard input goes only to the focused practice window. Stop Codex stays in the top bar.</li>
-            </ul>
-            <div class="admin-actions">
-              <p id="admin-status" class="admin-status" role="status" aria-live="polite">Codex is not running.</p>
-              <button id="admin-stop" class="btn btn-outline admin-stop" type="button" disabled>Stop Codex</button>
-              <button id="admin-run" class="btn admin-run" type="button">Start Codex practice</button>
+            <label class="visually-hidden" for="admin-prompt">Instructions for Codex</label>
+            <textarea id="admin-prompt" class="admin-prompt" rows="2" spellcheck="false" aria-describedby="admin-terms">Complete all five practice questions correctly. Use the personalized input tools and inspect results. Get 5/5.</textarea>
+
+            <div class="admin-foot">
+              <ul id="admin-terms" class="admin-terms">
+                <li>Local practice only. Nothing starts until you press <strong>Start Codex practice</strong>.</li>
+                <li>Needs the official Codex login.</li>
+                <li>While it runs, your instructions and practice-window screenshots are sent to OpenAI.</li>
+                <li>Codex's mouse and keyboard input goes only to the focused practice window. Stop Codex stays in the top bar.</li>
+              </ul>
+              <div class="admin-actions">
+                <p id="admin-status" class="admin-status" role="status" aria-live="polite">Codex is not running.</p>
+                <button id="admin-stop" class="btn btn-outline admin-stop" type="button" disabled>Stop Codex</button>
+                <button id="admin-run" class="btn admin-run" type="button">Start Codex practice</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="admin-panel-intake" class="admin-panel intake" role="tabpanel" aria-labelledby="admin-tab-intake">
+            <h3 class="admin-panel-title">Participant submissions</h3>
+            <div class="intake-grid">
+              <ul id="intake-terms" class="admin-terms intake-terms">
+                <li><strong>Approve once.</strong> Approve a participant's GitHub account one time. After that, their later private submissions are collected while this Admin app is open.</li>
+                <li><strong>Unknown accounts wait.</strong> Submissions from accounts you have not approved stay pending until you approve them.</li>
+                <li><strong>Closing stops it.</strong> Collection runs only inside this app. Closing the app, or pressing <strong>Stop collection</strong>, stops the worker.</li>
+                <li><strong>No automatic profile changes.</strong> Collecting a submission never updates a typing profile on its own.</li>
+                <li><strong>Organizer sign-in.</strong> Uses the organizer's existing managed GitHub CLI sign-in on this computer. Participants keep their own, separate sign-in in their app.</li>
+              </ul>
+
+              <div class="intake-work">
+                <div class="intake-meta">
+                  <p id="intake-status" class="intake-status" role="status" aria-live="polite">Not checked</p>
+                  <p class="intake-count">
+                    <span class="intake-count-label">Approved accounts</span>
+                    <span id="intake-approved-count" class="intake-count-num">&ndash;</span>
+                  </p>
+                </div>
+
+                <h4 id="intake-queue-title" class="intake-queue-title">Pending accounts</h4>
+                <div id="intake-queue" class="intake-queue" aria-labelledby="intake-queue-title"></div>
+                <p class="intake-empty">Nothing listed. After a check, accounts that sent a submission but are not approved yet appear here.</p>
+              </div>
+            </div>
+
+            <div class="intake-foot">
+              <div class="intake-actions">
+                <button id="intake-refresh" class="btn btn-outline intake-btn" type="button" aria-describedby="intake-keys">Check invitations</button>
+                <button id="intake-catchup" class="btn btn-outline intake-btn" type="button" aria-describedby="intake-keys">Collect now</button>
+                <span class="intake-actions-fill"></span>
+                <button id="intake-stop" class="btn btn-outline admin-stop intake-btn" type="button" disabled>Stop collection</button>
+                <button id="intake-start" class="btn admin-run intake-btn" type="button" aria-describedby="intake-keys">Start automatic collection</button>
+              </div>
+              <p id="intake-keys" class="intake-keys">
+                <strong>Check invitations</strong> refreshes the pending list. <strong>Collect now</strong>
+                collects from approved accounts once. <strong>Automatic collection</strong> keeps doing that
+                until you stop it or close the app.
+              </p>
             </div>
           </div>
         </section>
