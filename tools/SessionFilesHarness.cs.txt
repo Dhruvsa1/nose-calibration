@@ -25,6 +25,11 @@ internal class Harness
             byte[] bytes={1,2,3,4};File.WriteAllBytes(zip,bytes);string digest=Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             File.WriteAllText(Path.Combine(folder,"upload-state.json"),JsonSerializer.Serialize(new{Version=2,SessionId=id,ZipSha256=digest}));
             Check(CollectorSessionFiles.FrozenBundle(folder,zip)==zip && File.ReadAllBytes(zip).SequenceEqual(bytes),"frozen archive reused unchanged");
+            File.WriteAllText(Path.Combine(folder,"upload-state.json"),JsonSerializer.Serialize(new{Version=3,SessionId=id,ZipSha256=digest}));
+            Check(CollectorSessionFiles.FrozenBundle(folder,zip)==zip && File.ReadAllBytes(zip).SequenceEqual(bytes),"selected-repository frozen archive reused unchanged");
+            File.WriteAllText(Path.Combine(folder,"upload-state.json"),JsonSerializer.Serialize(new{Version=4,SessionId=id,ZipSha256=digest}));
+            Reject(()=>CollectorSessionFiles.FrozenBundle(folder,zip),"unknown upload version");
+            File.WriteAllText(Path.Combine(folder,"upload-state.json"),JsonSerializer.Serialize(new{Version=3,SessionId=id,ZipSha256=digest}));
             File.WriteAllText(Path.Combine(folder,"answers.json"),"{\"values\":[\"edited later\"]}");Check(CollectorSessionFiles.FrozenBundle(folder,zip)==zip && File.ReadAllBytes(zip).SequenceEqual(bytes),"changed session files cannot rebuild upload archive");
             File.AppendAllText(zip,"tamper");var tampered=File.ReadAllBytes(zip);Reject(()=>CollectorSessionFiles.FrozenBundle(folder,zip),"altered archive");Check(File.ReadAllBytes(zip).SequenceEqual(tampered),"altered archive was overwritten");
             File.Delete(zip);Reject(()=>CollectorSessionFiles.FrozenBundle(folder,zip),"missing archive");Check(!File.Exists(zip),"missing archive recreated");

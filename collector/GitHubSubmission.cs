@@ -3,19 +3,31 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace NoseCalibration;
+// Uploads to the participant's one selected private repository through the
+// GitHub App user token (contents write + metadata read). It never creates
+// repositories, invites collaborators, or supplies a blob sha, so it cannot
+// overwrite an existing remote file.
 internal static class GitHubSubmission
 {
     internal const string Researcher = "Dhruvsa1";
     internal const long ResearcherId = 135009056;
     internal const string RecipientKeySha256 = "d23bfc4486b4a270db2a479de1b9f2dee6907d7ae4113f3110633bc763009661";
-    const int MaxEnvelope = 31 * 1024 * 1024, MaxJson = 2 * 1024 * 1024;
-    sealed class RequestFailure(HttpStatusCode status) : InvalidOperationException("GitHub request failed (HTTP " + (int)status + "). Your recording and upload state remain local; retry sharing.")
+    internal const int StateVersion = 3;
+    const int MaxEnvelope = 31 * 1024 * 1024, MaxJson = 2 * 1024 * 1024, MaxState = 16384;
+    const string Preserved = " Your recording and encrypted file remain on this computer.";
+    sealed class RequestFailure(HttpStatusCode status) : InvalidOperationException("GitHub request failed (HTTP " + (int)status + ")." + Preserved + " Retry sharing.")
     {
         internal HttpStatusCode Status { get; } = status;
     }
+    // The encrypted file is uploaded and verified, but organizer access is not
+    // confirmed. Pending invitations need Administration permission to list, so
+    // the participant retries after the organizer accepts.
+    internal sealed class OrganizerAccessPending() : InvalidOperationException("Your encrypted submission was uploaded and verified, but organizer " + Researcher + " does not have access to your nose-calibration-submissions repository yet. If you have not invited " + Researcher + ", add them as a collaborator in the repository settings. If you already did, the organizer still needs to accept; this app cannot see pending invitations. Share again later to confirm; the same encrypted file is reused.");
+
     internal static byte[] Encrypt(byte[] plain, string sessionId, long accountId, string publicKey)
     {
         byte[] key = RandomNumberGenerator.GetBytes(32), nonce = RandomNumberGenerator.GetBytes(12), tag = new byte[16], encrypted = new byte[plain.Length];
@@ -29,19 +41,62 @@ internal static class GitHubSubmission
         }
         finally { CryptographicOperations.ZeroMemory(key); }
     }
-    internal sealed record UploadState(int Version, long AccountId, string SessionId, string ZipSha256, string EnvelopeSha256,
-        long? RepositoryId = null, bool CreationPending = false, DateTimeOffset? CreationStartedAt = null, bool Complete = false);
+    // Version 3: one reusable selected repository, immutable per-session path.
+    // RepositoryId is pinned when the state is first saved and never changes.
+    internal sealed record UploadState(int Version, string SessionId, long AccountId, long RepositoryId, string RemotePath,
+        string ZipSha256, string EnvelopeSha256, bool RemoteWriteStarted = false, bool Uploaded = false, bool OrganizerVerified = false);
+    static readonly JsonSerializerOptions StrictState = new() { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
+    internal static void RejectDuplicateProperties(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var property in element.EnumerateObject())
+            {
+                if (!names.Add(property.Name)) throw new InvalidDataException("Ambiguous JSON response or upload state.");
+                RejectDuplicateProperties(property.Value);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+            foreach (var item in element.EnumerateArray()) RejectDuplicateProperties(item);
+    }
+    internal static string RemotePath(string sessionId) => "submissions/" + sessionId + "/submission.nose";
     static string Digest(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     static void SaveState(string path, UploadState state)
     {
         string temp = path + ".tmp"; File.WriteAllText(temp, JsonSerializer.Serialize(state)); File.Move(temp, path, true);
     }
-    internal static void VerifyRepo(JsonElement repo, long accountId, string name, long? repositoryId)
+    static UploadState? LoadState(string path, string sessionId)
     {
-        if (!repo.GetProperty("private").GetBoolean() || repo.GetProperty("owner").GetProperty("id").GetInt64() != accountId ||
-            repo.GetProperty("owner").GetProperty("type").GetString() != "User" || repo.GetProperty("name").GetString() != name ||
-            repo.GetProperty("id").GetInt64() <= 0 || repositoryId.HasValue && repo.GetProperty("id").GetInt64() != repositoryId)
-            throw new InvalidOperationException("Submission repository identity or privacy changed. Sharing stopped.");
+        if (!File.Exists(path)) return null;
+        const string legacy = "This session's saved upload state is from an earlier or unknown sharing version and cannot be moved to the selected repository automatically. No remote changes were made." + Preserved + " Contact the organizer.";
+        if (new FileInfo(path).Length > MaxState) throw new InvalidDataException(legacy);
+        string text = File.ReadAllText(path);
+        try
+        {
+            using (var probe = JsonDocument.Parse(text, new JsonDocumentOptions { MaxDepth = 4 }))
+            {
+                RejectDuplicateProperties(probe.RootElement);
+                if (probe.RootElement.ValueKind != JsonValueKind.Object || !probe.RootElement.TryGetProperty("Version", out var v) || !v.TryGetInt32(out int version) || version != StateVersion)
+                    throw new InvalidDataException();
+            }
+            var state = JsonSerializer.Deserialize<UploadState>(text, StrictState) ?? throw new InvalidDataException();
+            if (state.SessionId != sessionId || state.RemotePath != RemotePath(sessionId) || state.AccountId <= 0 || state.RepositoryId <= 0 ||
+                state.ZipSha256 is not { Length: 64 } || state.EnvelopeSha256 is not { Length: 64 } ||
+                !Regex.IsMatch(state.ZipSha256 + state.EnvelopeSha256, "\\A[a-f0-9]{128}\\z") || state.Uploaded && !state.RemoteWriteStarted)
+                throw new InvalidDataException();
+            return state;
+        }
+        catch { throw new InvalidDataException(legacy); }
+    }
+    internal static void VerifyRepo(JsonElement repo, GitHubAppAccess.VerifiedRepository expected)
+    {
+        var owner = repo.GetProperty("owner");
+        if (repo.GetProperty("id").GetInt64() != expected.RepositoryId || repo.GetProperty("name").GetString() != GitHubAppAccess.RepositoryName ||
+            repo.GetProperty("private").ValueKind != JsonValueKind.True || repo.GetProperty("visibility").GetString() != "private" ||
+            owner.GetProperty("id").GetInt64() != expected.AccountId || owner.GetProperty("type").GetString() != "User" ||
+            repo.GetProperty("archived").ValueKind != JsonValueKind.False || repo.GetProperty("disabled").ValueKind != JsonValueKind.False)
+            throw new InvalidOperationException("Your nose-calibration-submissions repository is no longer private, personal, active, or the same repository. Sharing stopped." + Preserved);
     }
     internal static async Task<byte[]> ReadBounded(HttpContent content, int limit, CancellationToken token)
     {
@@ -60,20 +115,75 @@ internal static class GitHubSubmission
         string publicKeyPath = Path.Combine(AppContext.BaseDirectory, "public-key.pem");
         using var publicKey = RSA.Create(); publicKey.ImportFromPem(await File.ReadAllTextAsync(publicKeyPath, cancellation));
         if (publicKey.KeySize != 3072 || Digest(publicKey.ExportSubjectPublicKeyInfo()) != RecipientKeySha256) throw new InvalidDataException("Recipient key verification failed. Reinstall the official package.");
-        using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+        using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false };
         using var http = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(5) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("NoseCalibration/0.1");
-        return await UploadCore(zip, session, http, publicKeyPath, cancellation, authorization.RequireToken, publicKey.ExportSubjectPublicKeyInfoPem());
+        return await UploadCore(zip, session, http, authorization.Repository, authorization.RevalidateRepository,
+            authorization.RequireToken, publicKey.ExportSubjectPublicKeyInfoPem(), cancellation);
     }
-    // Injectable HTTP client allows offline recovery tests. Production handler forbids redirects.
-    internal static async Task<string> UploadCore(string zip, string session, HttpClient http, string publicKeyPath, CancellationToken cancellation = default, Func<string>? tokenProvider = null, string? verifiedPublicKey = null)
+    // Injectable HTTP client and revalidation allow offline tests. Production handler forbids redirects.
+    internal static async Task<string> UploadCore(string zip, string session, HttpClient http, GitHubAppAccess.VerifiedRepository expected,
+        Func<CancellationToken, Task<GitHubAppAccess.VerifiedRepository>> revalidate, Func<string> tokenProvider, string verifiedPublicKey, CancellationToken cancellation = default)
     {
         cancellation.ThrowIfCancellationRequested();
-        string id = Path.GetFileName(Path.TrimEndingDirectorySeparator(session)), name = "nose-calibration-submission-" + id;
-        if (!Regex.IsMatch(id, "^[a-f0-9]{32}$")) throw new InvalidDataException("Invalid session ID");
+        string id = Path.GetFileName(Path.TrimEndingDirectorySeparator(session));
+        if (!Regex.IsMatch(id, "\\A[a-f0-9]{32}\\z")) throw new InvalidDataException("Invalid session ID");
+        string remotePath = RemotePath(id);
         using var uploadLock = new FileStream(Path.Combine(session, "upload.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         if (new FileInfo(zip).Length > 30 * 1024 * 1024) throw new InvalidOperationException("This recording exceeds the 30 MB sharing limit.");
-        async Task<(HttpStatusCode status, byte[] bytes)> Request(HttpMethod method, string path, object? body = null, bool raw = false)
+        string stateFile = Path.Combine(session, "upload-state.json"), envelopeFile = Path.Combine(session, "submission.nose"), stagedEnvelope = envelopeFile + ".tmp";
+        // Local checks run before any request: legacy or foreign state fails closed offline.
+        var saved = LoadState(stateFile, id);
+        if (saved == null && File.Exists(envelopeFile))
+            throw new InvalidOperationException("An encrypted submission exists for this session without matching upload state, so it was not replaced and nothing was uploaded." + Preserved + " Contact the organizer.");
+
+        // Fresh identity and full installation inventory; any drift from the
+        // sign-in record (account, installation, repository, permissions) stops sharing.
+        async Task<GitHubAppAccess.VerifiedRepository> Reverify()
+        {
+            var current = await revalidate(cancellation);
+            cancellation.ThrowIfCancellationRequested();
+            if (current != expected || current.Name != GitHubAppAccess.RepositoryName || current.AccountId <= 0 || current.RepositoryId <= 0 ||
+                !Regex.IsMatch(current.OwnerLogin, "\\A[A-Za-z0-9][A-Za-z0-9-]{0,38}\\z"))
+                throw new InvalidOperationException("GitHub App repository access changed since sign-in. Sign in again; nothing further was uploaded." + Preserved);
+            return current;
+        }
+        var verified = await Reverify();
+
+        byte[] plaintext = await File.ReadAllBytesAsync(zip, cancellation); byte[] envelope; UploadState state;
+        try
+        {
+            if (plaintext.Length > 30 * 1024 * 1024) throw new InvalidDataException("Recording size changed beyond limit");
+            string zipDigest = Digest(plaintext);
+            if (saved != null)
+            {
+                state = saved;
+                if (state.AccountId != verified.AccountId)
+                    throw new InvalidOperationException("This session was prepared for a different GitHub account. Sign in with the original account; no remote changes were made." + Preserved);
+                if (state.ZipSha256 != zipDigest) throw new InvalidDataException("The original recording ZIP changed after sharing began. Nothing was uploaded." + Preserved);
+                // The destination is pinned when state is first saved. A recreated
+                // repository with the same name is a different destination.
+                if (state.RepositoryId != verified.RepositoryId)
+                    throw new InvalidOperationException("Your nose-calibration-submissions repository is not the one this session was prepared for (it was replaced or reselected). It will not be sent to a different repository automatically." + Preserved + " Contact the organizer.");
+                if (!File.Exists(envelopeFile) && File.Exists(stagedEnvelope)) File.Move(stagedEnvelope, envelopeFile);
+                if (new FileInfo(envelopeFile).Length > MaxEnvelope) throw new InvalidDataException("Invalid saved envelope size");
+                envelope = await File.ReadAllBytesAsync(envelopeFile, cancellation);
+                if (Digest(envelope) != state.EnvelopeSha256) throw new InvalidDataException("Saved encrypted submission changed. Nothing was uploaded.");
+            }
+            else
+            {
+                envelope = Encrypt(plaintext, id, verified.AccountId, verifiedPublicKey);
+                // The final envelope name appears only after its state commits, so a
+                // stateless submission.nose is never ours to replace.
+                await File.WriteAllBytesAsync(stagedEnvelope, envelope, cancellation);
+                state = new UploadState(StateVersion, id, verified.AccountId, verified.RepositoryId, remotePath, zipDigest, Digest(envelope));
+                SaveState(stateFile, state); File.Move(stagedEnvelope, envelopeFile);
+            }
+        }
+        finally { CryptographicOperations.ZeroMemory(plaintext); }
+
+        string repository = "/repositories/" + verified.RepositoryId, contentPath = repository + "/contents/" + remotePath;
+        async Task<(HttpStatusCode status, byte[] bytes)> Request(HttpMethod method, string path, object? body = null, bool raw = false, bool single = false)
         {
             cancellation.ThrowIfCancellationRequested();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
@@ -81,138 +191,97 @@ internal static class GitHubSubmission
             using var request = new HttpRequestMessage(method, "https://api.github.com" + path);
             // Contents responses over 1 MB require the object media type for
             // metadata; payload integrity is checked separately with raw blobs.
-            bool contentsMetadata = method == HttpMethod.Get && path.EndsWith("/contents/submission.nose", StringComparison.Ordinal);
+            bool contentsMetadata = method == HttpMethod.Get && path == contentPath;
             request.Headers.Accept.ParseAdd(raw ? "application/vnd.github.raw+json" : contentsMetadata ? "application/vnd.github.object+json" : "application/vnd.github+json");
             request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
             if (body != null) request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
-            if (tokenProvider != null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenProvider());
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenProvider());
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             if (response.StatusCode == HttpStatusCode.NotFound && method == HttpMethod.Get) return (response.StatusCode, Array.Empty<byte>());
             if (!response.IsSuccessStatusCode) throw new RequestFailure(response.StatusCode);
+            // A listing that does not fit one page cannot prove who has access.
+            if (single && response.Headers.Contains("Link")) throw new InvalidDataException("GitHub returned a paginated list; sharing stopped.");
             return (response.StatusCode, await ReadBounded(response.Content, raw ? MaxEnvelope : MaxJson, timeout.Token));
         }
-        async Task<JsonElement?> Api(HttpMethod method, string path, object? body = null)
+        async Task<JsonElement?> Api(HttpMethod method, string path, object? body = null, bool single = false)
         {
-            var result = await Request(method, path, body);
+            var result = await Request(method, path, body, single: single);
             if (result.status == HttpStatusCode.NotFound) return null;
-            using var document = JsonDocument.Parse(result.bytes.Length == 0 ? "{}"u8.ToArray() : result.bytes);
+            using var document = JsonDocument.Parse(result.bytes.Length == 0 ? "{}"u8.ToArray() : result.bytes, new JsonDocumentOptions { MaxDepth = 16 });
+            RejectDuplicateProperties(document.RootElement);
             return document.RootElement.Clone();
         }
-        var user = await Api(HttpMethod.Get, "/user") ?? throw new InvalidOperationException("GitHub account unavailable.");
-        long accountId = user.GetProperty("id").GetInt64(); string login = user.GetProperty("login").GetString()!;
-        if (accountId <= 0 || !Regex.IsMatch(login, "^[A-Za-z0-9-]+$")) throw new InvalidDataException("Invalid GitHub account");
-        string stateFile = Path.Combine(session, "upload-state.json"), envelopeFile = Path.Combine(session, "submission.nose");
-        byte[] plaintext = await File.ReadAllBytesAsync(zip, cancellation); byte[] envelope; UploadState state;
-        try
+        async Task CheckRepository() => VerifyRepo(await Api(HttpMethod.Get, repository) ?? throw new InvalidOperationException("Your nose-calibration-submissions repository is unavailable." + Preserved), verified);
+        // Collaborator listing needs only Metadata read. Anyone besides the owner and
+        // the numerically pinned organizer stops sharing. Returns organizer write access.
+        async Task<bool> CheckCollaborators()
         {
-            if (plaintext.Length > 30 * 1024 * 1024) throw new InvalidDataException("Recording size changed beyond limit");
-            string zipDigest = Digest(plaintext);
-            if (File.Exists(stateFile))
+            var list = await Api(HttpMethod.Get, repository + "/collaborators?affiliation=all&per_page=100", single: true) ?? throw new InvalidOperationException("Repository collaborators unavailable." + Preserved);
+            if (list.ValueKind != JsonValueKind.Array || list.GetArrayLength() >= 100) throw new InvalidDataException("Unexpected collaborator list; sharing stopped.");
+            bool organizer = false;
+            foreach (var person in list.EnumerateArray())
             {
-                if (new FileInfo(stateFile).Length > 16384) throw new InvalidDataException("Invalid upload state");
-                state = JsonSerializer.Deserialize<UploadState>(await File.ReadAllTextAsync(stateFile, cancellation)) ?? throw new InvalidDataException("Invalid upload state");
-                if (state.Version != 2 || state.AccountId != accountId || state.SessionId != id || state.ZipSha256 != zipDigest ||
-                    state.RepositoryId is <= 0 || state.CreationPending && state.CreationStartedAt == null)
-                    throw new InvalidOperationException("Upload state belongs to a different account, recording, or unsupported earlier version. No remote changes made.");
-                if (new FileInfo(envelopeFile).Length > MaxEnvelope) throw new InvalidDataException("Invalid saved envelope size");
-                envelope = await File.ReadAllBytesAsync(envelopeFile, cancellation);
-                if (Digest(envelope) != state.EnvelopeSha256) throw new InvalidDataException("Saved encrypted submission changed");
+                long personId = person.GetProperty("id").GetInt64();
+                if (personId == verified.AccountId) continue;
+                if (personId != ResearcherId)
+                    throw new InvalidOperationException("Your nose-calibration-submissions repository has a collaborator other than organizer " + Researcher + ". Remove other collaborators, then share again." + Preserved);
+                var p = person.GetProperty("permissions");
+                organizer = p.GetProperty("push").ValueKind == JsonValueKind.True && p.GetProperty("pull").ValueKind == JsonValueKind.True;
             }
-            else
-            {
-                envelope = Encrypt(plaintext, id, accountId, verifiedPublicKey ?? await File.ReadAllTextAsync(publicKeyPath, cancellation));
-                // A crash before state commit creates only a local orphan, before any remote write.
-                await File.WriteAllBytesAsync(envelopeFile + ".tmp", envelope, cancellation); File.Move(envelopeFile + ".tmp", envelopeFile, true);
-                state = new UploadState(2, accountId, id, zipDigest, Digest(envelope)); SaveState(stateFile, state);
-            }
+            return organizer;
         }
-        finally { CryptographicOperations.ZeroMemory(plaintext); }
-        string byName = "/repos/" + login + "/" + name;
-        JsonElement repo;
-        if (state.RepositoryId.HasValue)
-            repo = await Api(HttpMethod.Get, "/repositories/" + state.RepositoryId) ?? throw new InvalidOperationException("Pinned submission repository no longer exists.");
-        else
-        {
-            // A lost create response leaves no immutable repository identity to trust.
-            // Names and timestamps cannot prove that a repository was not replaced.
-            if (state.CreationPending)
-                throw new InvalidOperationException("Repository creation was not confirmed and its immutable ID was not saved. Automatic retry is blocked. Open local recordings, find this session's encrypted submission.nose, and arrange a secure handoff with the organizer. Keep the plaintext ZIP private.");
-            var existing = await Api(HttpMethod.Get, byName);
-            if (existing.HasValue)
-            {
-                throw new InvalidOperationException("A repository already uses this submission name; refusing to adopt it. Your recording is preserved locally; start a new session or contact the organizer.");
-            }
-            else
-            {
-                cancellation.ThrowIfCancellationRequested();
-                state = state with { CreationPending = true, CreationStartedAt = DateTimeOffset.UtcNow }; SaveState(stateFile, state);
-                try
-                {
-                    repo = await Api(HttpMethod.Post, "/user/repos", new { name, @private = true, description = "Private encrypted Nose Calibration submission", has_issues = false, has_wiki = false, auto_init = false })
-                        ?? throw new InvalidOperationException();
-                }
-                catch (RequestFailure failure) when ((int)failure.Status is >= 400 and < 500 && failure.Status != HttpStatusCode.RequestTimeout)
-                {
-                    // A received client-error response confirms rejection. A timeout, lost
-                    // response, server error, or invalid success body is still ambiguous.
-                    state = state with { CreationPending = false, CreationStartedAt = null };
-                    SaveState(stateFile, state);
-                    throw;
-                }
-                catch (OperationCanceledException) { throw; }
-                catch
-                {
-                    throw new InvalidOperationException("Repository creation could not be confirmed. Automatic retry is blocked. Open local recordings, find this session's encrypted submission.nose, and arrange a secure handoff with the organizer. Keep the plaintext ZIP private.");
-                }
-            }
-            VerifyRepo(repo, accountId, name, null);
-            state = state with { RepositoryId = repo.GetProperty("id").GetInt64(), CreationPending = false }; SaveState(stateFile, state);
-        }
-        VerifyRepo(repo, accountId, name, state.RepositoryId);
-        string repository = "/repositories/" + state.RepositoryId;
         string blobSha;
         using (var blob = new MemoryStream())
         { blob.Write(Encoding.ASCII.GetBytes("blob " + envelope.Length + "\0")); blob.Write(envelope); blobSha = Convert.ToHexString(SHA1.HashData(blob.ToArray())).ToLowerInvariant(); }
         async Task<bool> VerifyPayload()
         {
-            var content = await Api(HttpMethod.Get, repository + "/contents/submission.nose");
+            var content = await Api(HttpMethod.Get, contentPath);
             if (!content.HasValue) return false;
             var c = content.Value;
-            if (c.GetProperty("type").GetString() != "file" || c.GetProperty("path").GetString() != "submission.nose" || c.GetProperty("size").GetInt64() != envelope.Length || c.GetProperty("sha").GetString() != blobSha)
-                throw new InvalidOperationException("Remote submission differs from the saved encrypted payload; refusing to overwrite it.");
+            if (c.ValueKind != JsonValueKind.Object || c.GetProperty("type").GetString() != "file" || c.GetProperty("path").GetString() != remotePath ||
+                c.GetProperty("size").GetInt64() != envelope.Length || c.GetProperty("sha").GetString() != blobSha)
+                throw new InvalidOperationException("A different file already exists at this session's path in your repository; it was not overwritten." + Preserved + " Contact the organizer.");
             var remote = await Request(HttpMethod.Get, repository + "/git/blobs/" + blobSha, raw: true);
             if (remote.status == HttpStatusCode.NotFound || remote.bytes.Length != envelope.Length || Digest(remote.bytes) != state.EnvelopeSha256)
-                throw new InvalidOperationException("Remote encrypted payload verification failed.");
+                throw new InvalidOperationException("Remote encrypted payload verification failed." + Preserved);
             return true;
         }
+
+        await CheckRepository();
+        await CheckCollaborators();
         if (!await VerifyPayload())
         {
-            if (state.Complete) throw new InvalidOperationException("A completed remote submission was removed. No replacement uploaded.");
-            await Api(HttpMethod.Put, repository + "/contents/submission.nose", new { message = "Submit encrypted calibration recording", content = Convert.ToBase64String(envelope) });
-            if (!await VerifyPayload()) throw new InvalidOperationException("Upload not yet verified. Retry sharing; the same encrypted payload will be reused.");
-        }
-        VerifyRepo(await Api(HttpMethod.Get, repository) ?? throw new InvalidOperationException("Repository unavailable"), accountId, name, state.RepositoryId);
-        if (accountId != ResearcherId)
-        {
-            var researcher = await Api(HttpMethod.Get, "/users/" + Researcher) ?? throw new InvalidOperationException("Organizer unavailable");
-            if (researcher.GetProperty("id").GetInt64() != ResearcherId) throw new InvalidOperationException("Organizer identity changed. Sharing stopped.");
-            // Personal repositories grant collaborators write access, as the consent UI discloses.
-            var invitation = await Api(HttpMethod.Put, repository + "/collaborators/" + Researcher, new { permission = "push" });
-            if (invitation.HasValue && invitation.Value.TryGetProperty("invitee", out var invitee))
+            if (state.Uploaded) throw new InvalidOperationException("A completed remote submission was removed. No replacement was uploaded." + Preserved + " Contact the organizer.");
+            cancellation.ThrowIfCancellationRequested();
+            state = state with { RemoteWriteStarted = true }; SaveState(stateFile, state);
+            // Installation scope can change live; reverify with nothing between this and the write.
+            await Reverify();
+            try
             {
-                if (invitee.GetProperty("id").GetInt64() != ResearcherId || invitation.Value.GetProperty("permissions").GetString() != "write")
-                    throw new InvalidOperationException("Organizer write-access invitation could not be verified.");
+                // No sha: GitHub rejects the write if the path already exists. The noreply
+                // committer keeps the participant's commit email out of the history.
+                await Api(HttpMethod.Put, contentPath, new { message = "Add encrypted calibration submission " + id, content = Convert.ToBase64String(envelope),
+                    committer = new { name = verified.OwnerLogin, email = verified.AccountId + "+" + verified.OwnerLogin + "@users.noreply.github.com" } });
             }
-            else
+            catch (RequestFailure failure) when (failure.Status is HttpStatusCode.Conflict or HttpStatusCode.UnprocessableEntity)
             {
-                var permission = await Api(HttpMethod.Get, repository + "/collaborators/" + Researcher + "/permission") ?? throw new InvalidOperationException("Organizer permission unavailable");
-                if (permission.GetProperty("user").GetProperty("id").GetInt64() != ResearcherId || permission.GetProperty("permission").GetString() != "write")
-                    throw new InvalidOperationException("Organizer write access could not be verified.");
+                // Existing path or a concurrent commit; verification below decides.
             }
+            catch (OperationCanceledException) { throw; }
+            catch (RequestFailure) { throw; }
+            catch
+            {
+                throw new InvalidOperationException("Upload outcome could not be confirmed. Share again: the same encrypted file will be verified and reused, never overwritten." + Preserved);
+            }
+            if (!await VerifyPayload()) throw new InvalidOperationException("Upload not yet verified. Share again; the same encrypted file will be reused." + Preserved);
         }
-        VerifyRepo(await Api(HttpMethod.Get, repository) ?? throw new InvalidOperationException("Repository unavailable"), accountId, name, state.RepositoryId);
+        state = state with { Uploaded = true }; SaveState(stateFile, state);
+        await Reverify();
+        await CheckRepository();
+        bool organizerAccess = await CheckCollaborators();
+        if (verified.AccountId != ResearcherId && !organizerAccess) throw new OrganizerAccessPending();
         cancellation.ThrowIfCancellationRequested();
-        SaveState(stateFile, state with { Complete = true });
-        return "https://github.com/" + login + "/" + name;
+        SaveState(stateFile, state with { OrganizerVerified = true });
+        return "https://github.com/" + verified.OwnerLogin + "/" + GitHubAppAccess.RepositoryName;
     }
 }

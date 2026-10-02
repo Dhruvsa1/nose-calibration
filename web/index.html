@@ -483,71 +483,134 @@
           </div>
           <div class="share-body">
             <p class="share-copy">
-              Your session stays on this computer unless you complete the steps below. Signing in
-              uploads nothing; only Encrypt and share starts an upload, and it goes to a private
-              repository, not a public one. A receipt confirms completion; an interrupted upload
-              may leave encrypted files in your private submission repository.
+              Your session stays on this computer unless you finish the steps below. Signing in
+              uploads nothing. Only <strong>Encrypt and share</strong> uploads, and only to a private
+              repository you own. An interrupted upload may leave an encrypted file there; it is
+              never overwritten.
             </p>
 
-            <ol class="share-steps">
-              <li>
-                <span class="share-step-title">Sign in to GitHub</span>
-                Nose Calibration has its own GitHub sign-in and does not use GitHub CLI or other
-                GitHub logins saved on this computer. The app shows a one-time code to enter at
-                <code>github.com/login/device</code>. GitHub then asks you to approve the broad
-                <code>repo</code> scope, which allows reading and writing every repository your
-                account can reach, including private ones. After you approve, the account name
-                appears beside <strong>Sign out</strong>; check it is the account you mean to use.
-              </li>
-              <li>
-                <span class="share-step-title">Encrypted on this computer</span>
-                The recording is encrypted here with the organizer's public key before it leaves.
-                It is intended to be readable only with the organizer's private key.
-              </li>
-              <li>
-                <span class="share-step-title">Private repository in your account</span>
-                A new private repository is created in your own GitHub account. It holds only the
-                encrypted submission file. You remain its owner.
-              </li>
-              <li class="share-step-caution">
-                <span class="share-step-title">Organizer gets write access to that repository</span>
-                GitHub personal repositories have no read-only option for collaborators, so the
-                organizer is added as a collaborator with <strong>write</strong> access. They can
-                read, change or delete files in that one submission repository. This does not add
-                them to your other repositories. You can remove them from the repository's
-                settings at any time.
-              </li>
-            </ol>
-
-            <p class="model-note">
-              Numeric metrics derived from your session may be reviewed by OpenAI Codex. Raw code,
-              key presses and screenshots are not automatically sent to any AI model.
-            </p>
-
-            <label class="check" for="share-consent">
-              <input id="share-consent" type="checkbox">
-              <span class="check-box" aria-hidden="true"></span>
-              <span class="check-text">
-                I consent to encrypt this session on this computer, store it in a new private
-                repository in my GitHub account, and give the study organizer write access to that
-                one repository.
-              </span>
-            </label>
-
-            <div class="button-row">
-              <button id="sign-in" class="btn btn-outline" type="button">Sign in to GitHub</button>
-              <button id="share-session" class="btn btn-primary" type="button">Encrypt and share</button>
-              <div class="account">
-                <span class="account-dot" aria-hidden="true"></span>
-                <p id="github-account" class="account-status" role="status" aria-live="polite">Not signed in to GitHub</p>
-                <button id="sign-out" class="btn btn-quiet account-out" type="button" aria-describedby="account-note" disabled>Sign out</button>
+            <!-- What the participant is agreeing to, before any setup step. -->
+            <dl class="share-facts" aria-label="What sharing involves">
+              <div class="share-fact">
+                <dt>Encrypted here</dt>
+                <dd>Encrypted on this computer with the organizer's public key before it leaves. It is intended to be readable only with the organizer's private key.</dd>
               </div>
-            </div>
+              <div class="share-fact">
+                <dt>One repository</dt>
+                <dd>The app can reach only the repository you select: Contents read and write, Metadata read-only. Each recording is added as its own file; existing files are never replaced.</dd>
+              </div>
+              <div class="share-fact">
+                <dt>Short-lived sign-in</dt>
+                <dd>The token stays in this app's memory for at most 8 hours and is never saved. GitHub's refresh token is discarded.</dd>
+              </div>
+              <div class="share-fact share-fact-caution">
+                <dt>Organizer keeps write access</dt>
+                <dd>Personal repositories have no read-only collaborators, so the organizer can read, change or delete files in this one repository, for this and later recordings, until you remove them. They get nothing in your other repositories. This narrows access; it does not make sharing risk-free.</dd>
+              </div>
+            </dl>
+
+            <!-- Steps 1-3: buttons ask the host to open fixed GitHub pages in the browser. The page
+                 builds no URLs and shows no completion state; GitHub is the source of truth. -->
+            <details class="setup" open>
+              <summary class="setup-head">
+                <h3 class="setup-name">Set up once per GitHub account</h3>
+                <span class="setup-meta">Already done? Go to step 4</span>
+                <span class="chev" aria-hidden="true"></span>
+              </summary>
+              <p class="setup-note">Each button opens github.com in your browser. This app creates, installs and invites nothing by itself.</p>
+              <ol class="steps">
+                <li class="step">
+                  <span class="step-num" aria-hidden="true">1</span>
+                  <div class="step-text">
+                    <h4 class="step-title">Create a private repository</h4>
+                    <p>In your personal account, name it exactly <code class="pick">nose-calibration-submissions</code> and choose <strong>Private</strong>. One repository holds every recording you share.</p>
+                  </div>
+                  <button id="github-create-repo" class="btn btn-outline step-btn" type="button">Create repository</button>
+                </li>
+                <li class="step">
+                  <span class="step-num" aria-hidden="true">2</span>
+                  <div class="step-text">
+                    <h4 class="step-title">Install the Nose Calibration app on that repository only</h4>
+                    <p>Choose <strong>Only select repositories</strong>, then pick <code class="pick">nose-calibration-submissions</code>.</p>
+                    <p class="step-warn"><strong>Never choose All repositories</strong>, even if GitHub selects it first.</p>
+                  </div>
+                  <button id="github-install-app" class="btn btn-outline step-btn" type="button">Install app</button>
+                </li>
+                <li class="step">
+                  <span class="step-num" aria-hidden="true">3</span>
+                  <div class="step-text">
+                    <h4 class="step-title">Invite the organizer, once</h4>
+                    <p>Open <code class="pick">nose-calibration-submissions</code>, then <strong>Settings &rsaquo; Collaborators &rsaquo; Add people</strong> and add <code class="pick">Dhruvsa1</code>. The organizer must accept. Add no one else: other collaborators block sharing.</p>
+                  </div>
+                  <button id="github-invite-organizer" class="btn btn-outline step-btn" type="button">Open my repositories</button>
+                </li>
+              </ol>
+            </details>
+
+            <section class="setup setup-each" aria-labelledby="each-title">
+              <div class="setup-head setup-head-static">
+                <h3 id="each-title" class="setup-name">Each recording</h3>
+              </div>
+              <ol class="steps" start="4">
+                <li class="step step-wide">
+                  <span class="step-num" aria-hidden="true">4</span>
+                  <div class="step-text">
+                    <h4 class="step-title">Sign in to GitHub</h4>
+                    <p>
+                      This app has its own sign-in and does not use other GitHub logins on this
+                      computer. Enter the code it shows at <code>github.com/login/device</code>.
+                      <strong>Only enter a code this app displays</strong>, never one someone sends
+                      you. Then check the account name below.
+                    </p>
+                    <div class="button-row">
+                      <button id="sign-in" class="btn btn-outline" type="button">Sign in to GitHub</button>
+                      <div class="account">
+                        <span class="account-dot" aria-hidden="true"></span>
+                        <p id="github-account" class="account-status" role="status" aria-live="polite">Not signed in to GitHub</p>
+                        <button id="sign-out" class="btn btn-quiet account-out" type="button" aria-describedby="account-note" disabled>Sign out</button>
+                      </div>
+                    </div>
+                  </div>
+                </li>
+                <li class="step step-wide">
+                  <span class="step-num" aria-hidden="true">5</span>
+                  <div class="step-text">
+                    <h4 class="step-title">Consent, then encrypt and share</h4>
+                    <p class="model-note">
+                      Numeric metrics derived from your session may be reviewed by OpenAI Codex. Raw code,
+                      key presses and screenshots are not automatically sent to any AI model.
+                    </p>
+
+                    <label class="check" for="share-consent">
+                      <input id="share-consent" type="checkbox">
+                      <span class="check-box" aria-hidden="true"></span>
+                      <span class="check-text">
+                        I consent to encrypt this session on this computer, store it in my private
+                        <code>nose-calibration-submissions</code> repository, and let the study
+                        organizer keep write access to that one repository until I remove them.
+                      </span>
+                    </label>
+
+                    <div class="button-row">
+                      <button id="share-session" class="btn btn-primary" type="button" aria-describedby="receipt-note">Encrypt and share</button>
+                    </div>
+                    <p id="receipt-note" class="receipt-note">
+                      A receipt appears below only after the upload is verified and the organizer's
+                      access is confirmed. If the organizer has not accepted yet, you see a pending
+                      notice instead; sharing again later only rechecks access and never uploads twice.
+                    </p>
+                  </div>
+                </li>
+              </ol>
+            </section>
+
             <p id="account-note" class="account-note">
-              The access token is kept in this app's memory and is not saved. Sign out or closing
-              the app discards it here, but does not revoke the authorization on GitHub. To revoke
-              it, open GitHub <strong>Settings &rsaquo; Applications &rsaquo; Authorized OAuth
-              Apps</strong> and revoke Nose Calibration.
+              <strong>Stopping access.</strong> Sign out or closing the app discards the token here,
+              but does not revoke the grant on GitHub. To revoke it, open GitHub
+              <strong>Settings &rsaquo; Applications &rsaquo; Authorized GitHub Apps</strong> and
+              revoke Nose Calibration. To stop all sharing, also uninstall it under
+              <strong>Installed GitHub Apps</strong> and remove the organizer from the repository's
+              collaborators, or delete the repository.
             </p>
 
             <div id="receipt" class="receipt" aria-live="polite"></div>

@@ -1162,16 +1162,104 @@ select.answer-input option { background: var(--bg-raise); }
 }
 
 .share-body { padding: 18px 22px 22px 16px; color: var(--text-2); }
-.share-copy { margin: 0 0 16px; }
-.share-steps { margin: 0 0 16px; padding-left: 22px; display: grid; gap: 12px; font-size: 13.5px; }
-.share-steps li::marker { color: var(--muted); font-weight: 600; }
-.share-step-title { display: block; color: var(--text); font-weight: 600; }
-.share-step-caution { padding: 10px 12px 10px 0; }
-.share-step-caution .share-step-title { color: var(--amber); }
-.model-note { margin: 0; font-size: 13px; color: var(--muted); }
-.share-panel .check { border-color: var(--line-strong); background: var(--bg-raise); }
+.share-copy { margin: 0 0 14px; max-width: 78ch; }
+.share-copy strong { color: var(--text); font-weight: 600; }
+
+/* What sharing involves: read before any setup step. The caution row spans the strip. */
+.share-facts {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 0 14px;
+  border: 1px solid var(--line); border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-raise);
+}
+.share-fact { min-width: 0; padding: 10px 14px 12px; }
+.share-fact + .share-fact { border-left: 1px solid var(--line); }
+.share-fact dt {
+  color: var(--muted);
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+}
+.share-fact dd { margin: 3px 0 0; font-size: 12.5px; line-height: 1.5; }
+.share-fact + .share-fact-caution {
+  grid-column: 1 / -1;
+  border-left: 0; border-top: 1px solid var(--line);
+  background: rgba(231, 182, 92, 0.055);
+  box-shadow: inset 2px 0 0 var(--amber);
+}
+.share-fact-caution dt { color: var(--amber); }
+.share-fact-caution dd { color: var(--text-2); }
+
+/* Setup ledger: steps 1-3 once per account (collapsible), 4-5 every recording. Numbers are a
+   fixed index, never a progress mark: the page cannot see what was done on GitHub. */
+.setup {
+  margin: 0 0 14px;
+  border: 1px solid var(--line); border-radius: 8px;
+  overflow: hidden;
+}
+.setup-head {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 4px 14px;
+  min-height: 42px; padding: 0 16px 0 14px;
+  background: #1a1a18;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+.setup-head::-webkit-details-marker { display: none; }
+.setup-head:focus-visible { outline-offset: -2px; }
+details.setup[open] > .setup-head, .setup-head-static { border-bottom: 1px solid var(--line); }
+.setup-head-static { cursor: default; user-select: auto; }
+.setup-name { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+.setup-meta { color: var(--muted); font-size: 12px; }
+.setup-note { margin: 0; padding: 10px 16px 0 52px; color: var(--muted); font-size: 12px; }
+
+.steps { margin: 0; padding: 0; list-style: none; }
+.step {
+  display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 0 14px;
+  padding: 12px 16px 13px 14px;
+}
+.step + .step { border-top: 1px solid var(--line); }
+.step-wide { grid-template-columns: 24px minmax(0, 1fr); }
+.step-num {
+  display: grid; place-items: center;
+  width: 24px; height: 24px;
+  border: 1px solid var(--line-strong); border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-2);
+  font-family: var(--font-mono); font-size: 12px; line-height: 1;
+}
+.step-text { min-width: 0; font-size: 13px; }
+.step-text > p { margin: 3px 0 0; }
+.step-text strong { color: var(--text); font-weight: 600; }
+.step-title { margin: 1px 0 0; font-size: 13.5px; font-weight: 600; color: var(--text); }
+.step-text > .step-warn {
+  width: fit-content; max-width: 100%;
+  margin-top: 7px; padding: 4px 10px 5px;
+  border-left: 2px solid var(--red); border-radius: 0 4px 4px 0;
+  background: var(--red-wash);
+  color: #f3b9b6; font-size: 12.5px;
+}
+.step-warn strong { color: #ffd6d4; }
+/* Exact names: one click selects the whole value for copying into GitHub. */
+.pick {
+  padding: 0 5px;
+  border: 1px solid var(--line-strong); border-radius: 4px;
+  background: var(--bg-strip); color: var(--text);
+  white-space: nowrap; user-select: all;
+}
+/* The trailing arrow says "opens your browser"; it is drawn by CSS, not a link. */
+.step-btn { align-self: center; min-width: 176px; }
+.step-btn::after {
+  content: ""; flex: none; width: 10px; height: 10px; background: currentColor; opacity: 0.7;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M3 1.5h5.5V7M8.5 1.5 1.5 8.5' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M3 1.5h5.5V7M8.5 1.5 1.5 8.5' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.model-note { margin: 3px 0 0; font-size: 13px; color: var(--muted); }
+.share-panel .check { margin-top: 10px; border-color: var(--line-strong); background: var(--bg-raise); }
 .share-panel .check-box { border-color: #6e6f69; }
 .button-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
+.step .button-row { margin-top: 10px; }
+.receipt-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
 
 /* GitHub account: text comes from the host; an enabled Sign out means an app token is held. */
 .account {
@@ -1189,7 +1277,7 @@ select.answer-input option { background: var(--bg-raise); }
 }
 .account:has(#sign-out:not(:disabled)) .account-status { color: var(--text); font-weight: 600; }
 .account-out { height: 32px; }
-.account-note { margin: 10px 0 0; color: var(--muted); font-size: 12.5px; }
+.account-note { margin: 0; max-width: 92ch; color: var(--muted); font-size: 12.5px; }
 .account-note strong { color: var(--text-2); font-weight: 600; }
 .receipt { margin-top: 12px; color: var(--green-ink); font-size: 13px; word-break: break-all; }
 .receipt:empty { display: none; }
@@ -1252,7 +1340,19 @@ body { display: flex; flex-direction: column; }
   .window-cell + .window-cell { border-left: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
 }
 
+@container page (max-width: 780px) {
+  .share-facts { grid-template-columns: 1fr; }
+  .share-fact + .share-fact { border-left: 0; border-top: 1px solid var(--line); }
+}
+
 @container page (max-width: 640px) {
+  .step { grid-template-columns: 24px minmax(0, 1fr); }
+  .step-btn { grid-column: 2; justify-self: start; margin-top: 10px; }
+  /* Step 4 asks the participant to check the account name, so it wraps instead of truncating. */
+  .step .account-status { white-space: normal; overflow-wrap: anywhere; }
+  .setup-head { grid-template-columns: minmax(0, 1fr) auto; padding-top: 9px; padding-bottom: 9px; }
+  .setup-meta { grid-row: 2; grid-column: 1 / -1; }
+  .setup-note { padding-left: 14px; }
   .figure-row { grid-template-columns: 1fr; }
   .figure-cell + .figure-cell { border-left: 0; border-top: 1px solid var(--line); }
   .account { flex-basis: 100%; margin-left: 0; padding-left: 0; border-left: 0; }

@@ -56,7 +56,7 @@ internal static class CollectorSessionFiles
         using var state = ReadObject(Path.Combine(session, "upload-state.json"), 16384);
         var s = state.RootElement;
         string digest = s.GetProperty("ZipSha256").GetString() ?? "";
-        if (s.GetProperty("Version").GetInt32() != 2 || s.GetProperty("SessionId").GetString() != Path.GetFileName(session) || !Regex.IsMatch(digest, "\\A[a-f0-9]{64}\\z"))
+        if (s.GetProperty("Version").GetInt32() is not (2 or 3) || s.GetProperty("SessionId").GetString() != Path.GetFileName(session) || !Regex.IsMatch(digest, "\\A[a-f0-9]{64}\\z"))
             throw new InvalidDataException("Invalid saved upload state. The original upload ZIP was not changed.");
         if (!File.Exists(zip)) throw new InvalidOperationException("The original upload ZIP is missing. It cannot be recreated after sharing has begun; contact the organizer.");
         if (File.GetAttributes(zip).HasFlag(FileAttributes.ReparsePoint)) throw new InvalidDataException("Invalid upload ZIP");

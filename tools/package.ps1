@@ -10,10 +10,10 @@ $der = [Convert]::FromBase64String(($publicKey -replace '-----BEGIN PUBLIC KEY--
 $sha = [Security.Cryptography.SHA256]::Create()
 try { $keyDigest = ([BitConverter]::ToString($sha.ComputeHash($der))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
 if ($keyDigest -ne $pin.recipientSpkiSha256) { throw 'Recipient public key differs from reviewed pin.' }
-if (!$Preview -and !(Test-Path -LiteralPath (Join-Path $projectRoot 'oauth-client.json'))) { throw 'Dedicated GitHub OAuth client registration is required.' }
+if (!$Preview -and !(Test-Path -LiteralPath (Join-Path $projectRoot 'oauth-client.json'))) { throw 'Dedicated GitHub App registration is required.' }
 if (Test-Path -LiteralPath (Join-Path $projectRoot 'oauth-client.json')) {
     $client = Get-Content -LiteralPath (Join-Path $projectRoot 'oauth-client.json') -Raw | ConvertFrom-Json
-    if ($client.clientId -cne $pin.oauthClientId -or @($client.PSObject.Properties).Count -ne 1) { throw 'OAuth application identifier differs from reviewed pin.' }
+    if ($client.clientId -cne $pin.githubAppClientId -or $client.appId -ne $pin.githubAppId -or $client.slug -cne $pin.githubAppSlug -or @($client.PSObject.Properties).Count -ne 3) { throw 'GitHub App registration differs from reviewed pins.' }
 }
 $guide = Join-Path $projectRoot 'docs/Nose-Calibration-Setup.pdf'
 if (!$Preview -and !(Test-Path -LiteralPath $guide)) { throw 'Participant setup PDF is required for a release package.' }

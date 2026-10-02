@@ -2,5 +2,7 @@
   "recipientSpkiSha256": "d23bfc4486b4a270db2a479de1b9f2dee6907d7ae4113f3110633bc763009661",
   "researcherAccountId": 135009056,
   "researcherLogin": "Dhruvsa1",
-  "oauthClientId": "Ov23liZ3D7X5LRXKkAcm"
+  "githubAppClientId": "Iv23li4JwAA8Kc5EWiCM",
+  "githubAppId": 5167786,
+  "githubAppSlug": "nose-calibration"
 }

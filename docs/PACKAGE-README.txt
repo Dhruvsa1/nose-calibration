@@ -5,10 +5,17 @@ NOSE CALIBRATION — WINDOWS x64
 3. Read the recording notice, check consent, and choose Start session.
 4. Work through the practice questions normally. Answer accuracy is optional for human calibration.
 5. Choose Submit Test when finished, or Stop recording at any time.
-6. To share: choose Sign in to GitHub, enter the one-time code at
+6. Optional sharing setup, once: create a private personal repository named
+   nose-calibration-submissions. Install the Nose Calibration GitHub App using
+   Only select repositories, choosing only that repository. In its Settings >
+   Collaborators, invite Dhruvsa1 once. The organizer must accept.
+   The setup buttons on Results open the GitHub pages; finish each step there.
+7. For each recording: choose Sign in to GitHub, enter the one-time code at
    github.com/login/device, and authorize Nose Calibration. Check the account shown.
    Review the sharing notice, check its consent box, then choose Encrypt and share.
+   Use only the code shown by your collector, never a code someone sends you.
    Signing in alone does not upload a recording. Wait for a completion receipt.
+   If organizer access is pending, wait for acceptance and share again to verify.
 
 Microsoft Edge WebView2 Runtime is required; it is commonly already installed.
 If the app reports it missing, obtain it from Microsoft's official WebView2 download page.
@@ -27,17 +34,22 @@ Use Earlier recordings on the start screen to open a saved session and retry
 sharing. Opening an earlier recording does not restart recording.
 An exported ZIP contains readable private recording data: share it deliberately.
 
-GitHub sharing creates an encrypted recording in a dedicated private repository
-in your GitHub account, then invites Dhruvsa1 as collaborator. Personal GitHub
-repositories grant collaborators write access to that dedicated repository.
-The organizer can decrypt submitted recordings. Nose Calibration has a dedicated
-OAuth device sign-in; it does not use GitHub CLI or other saved GitHub logins.
-The broad repo scope allows reading and writing repositories your account can
-reach, including private ones, beyond this single submission repository.
+GitHub sharing writes encrypted recordings to your selected private inbox.
+The app does not create repositories, install itself or invite anyone.
+The GitHub App requires Contents read/write and Metadata read-only for that one
+repository. Never choose All repositories. Other collaborators block sharing.
+Personal GitHub repositories grant collaborators write access: the organizer can
+decrypt submitted recordings and read, change or delete inbox files, including
+future shared sessions, until you remove them. This is standing access.
+Device sign-in does not use GitHub CLI or other saved GitHub logins.
 The access token is kept only in app memory, for at most eight hours, and is not
 saved. Sign out or closing the app clears it locally without revoking GitHub
-authorization. To revoke, open GitHub Settings > Applications > Authorized OAuth
-Apps and revoke Nose Calibration. Remove the collaborator in repository settings.
+authorization. Refresh tokens are discarded. To revoke, open GitHub Settings >
+Applications > Authorized GitHub Apps and revoke Nose Calibration. Manage or
+uninstall the repository installation under Installed GitHub Apps. Remove the
+organizer separately in repository settings. These actions do not erase copies
+already received. Numeric aggregate metrics may receive optional Codex advisory
+review; raw code, key presses and screenshots are not automatically sent to a model.
 Failed/interrupted sharing may leave encrypted files in your private repository.
 
 See Nose-Calibration-Setup.pdf for the illustrated participant guide when included.

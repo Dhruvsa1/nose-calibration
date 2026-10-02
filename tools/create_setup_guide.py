@@ -30,7 +30,7 @@ def page(n, title, subtitle):
     text(subtitle, H-97)
     c.setFont('Helvetica', 9); c.setFillColor(HexColor('#52665d'))
     c.drawString(44, 28, 'Development preview - October 2026')
-    c.drawRightString(W-44, 28, f'{n} / 3')
+    c.drawRightString(W-44, 28, f'{n} / 4')
 
 def screenshot(name, top, height):
     image = ImageReader(str(ROOT / 'docs/images' / name))
@@ -53,13 +53,35 @@ y = text('<b>6. Finish or stop.</b> Choose <b>Submit Test</b> to grade answers a
 text('<b>What is recorded?</b> Only interactions in the focused practice interface: mouse movement/clicks, keyboard events, scrolling, selections, final answers and click-triggered page screenshots. Screenshots are throttled and capped. Do not type passwords or personal information into the practice answers.', y, small)
 c.showPage()
 
-page(3, 'Share only when you choose.', 'GitHub sign-in is required for optional encrypted sharing. You remain in control of the submission repository.')
-y = text('<b>7. Sign in.</b> On Results, choose <b>Sign in to GitHub</b>. Enter the app\'s one-time code at <b>github.com/login/device</b> and authorize <b>Nose Calibration</b>. Check the displayed account. This dedicated sign-in does not use GitHub CLI or other saved GitHub logins. Signing in alone uploads nothing.', 642, small)
-y = text('<b>8. Review, consent, share.</b> Read the sharing notice, check its consent box, then choose <b>Encrypt and share</b>. Keep the app open until a <b>Submitted successfully</b> receipt appears. An interrupted upload may leave encrypted files in your private repository.', y, small)
-y = text('<b>What GitHub access means</b><br/>The OAuth app requests broad <b>repo</b> permission: read and write access to repositories your account can reach, including private ones. It creates a dedicated private repository containing the encrypted recording and invites <b>Dhruvsa1</b> with <b>write access</b> to that repository. The organizer can decrypt your recording. You can remove the collaborator in repository settings.', y, small)
-y = text('<b>Sign out and revoke access</b><br/>The token stays in app memory for at most eight hours and is not saved. <b>Sign out</b> or closing the app clears it locally; this does not revoke GitHub authorization. To revoke access, go to GitHub <b>Settings &gt; Applications &gt; Authorized OAuth Apps</b> and revoke <b>Nose Calibration</b>.', y, small)
-y = text('<b>Keep it local, or return later</b><br/>Skip sharing to keep your recording here. <b>Export session file</b> saves readable recording data in a ZIP; share it only deliberately. Use <b>Earlier recordings</b> on the start screen to open a saved session and retry sharing. It does not restart recording. Sessions are stored in:<br/><font face="Courier" size="9">%LOCALAPPDATA%/NoseCalibration/sessions</font>', y, small)
-y = text('<b>If something does not work</b><br/>Missing WebView2: install Microsoft Edge WebView2 Runtime from Microsoft\'s official page:<br/><link href="https://developer.microsoft.com/microsoft-edge/webview2/">developer.microsoft.com/microsoft-edge/webview2/</link><br/>Sign-in or upload fails: your session remains local. Keep the error message and contact the organizer. Never post recordings, tokens or authorization codes in public issues.<br/>This preview is unsigned. If Windows warns, verify the download with the organizer; do not disable security software.', y, small)
-text('<b>Development preview:</b> local practice recording has been tested. Live GitHub upload and end-to-end participant validation remain untested; this guide is not release approval.', y, small)
+def setup_detail(top, source_top, source_bottom):
+    # Clip the approved synthetic screenshot inside the PDF, without altering it.
+    image = ImageReader(str(ROOT / 'docs/images/github-setup.png'))
+    iw, ih = image.getSize(); scale = (W-88)/iw
+    height = (source_bottom-source_top)*scale
+    c.saveState()
+    clip = c.beginPath(); clip.rect(44, top-height, W-88, height)
+    c.clipPath(clip, stroke=0, fill=0)
+    c.drawImage(image, 44, top-(ih-source_top)*scale, W-88, ih*scale)
+    c.restoreState()
+
+page(3, 'Set up sharing once.', 'Optional GitHub sharing uses one private repository. Finish these steps on GitHub.')
+y = text('On Results, the three setup buttons open GitHub pages. They do not create a repository, install the app or invite anyone for you.', 642)
+y = text('<b>1. Create repository.</b> In your personal account, create <b>nose-calibration-submissions</b> and choose <b>Private</b>. Reuse it for later recordings.', y)
+y = text('<b>2. Install app.</b> Install <b>Nose Calibration</b>. Choose <b>Only select repositories</b> and select only <b>nose-calibration-submissions</b>. Never choose All repositories. Check for <b>Contents: read and write</b> and <b>Metadata: read-only</b>.', y)
+y = text('<b>3. Open my repositories.</b> Open that repository, then <b>Settings &gt; Collaborators &gt; Add people</b>. Invite <b>Dhruvsa1</b> once; the organizer must accept. Add no other collaborators: they block sharing.', y)
+setup_detail(y-4, 356, 708)
+y -= 232
+text('<b>Standing access:</b> the organizer can decrypt shared recordings and keeps write access to this inbox, including future shared sessions, until you remove them. They can read, change or delete repository files. This narrows access; it does not make sharing risk-free.', y, small)
+c.showPage()
+
+page(4, 'Each recording: two steps.', 'Already set up GitHub? Sign in if needed, then consent and share.')
+y = text('<b>1. Sign in to GitHub.</b> Enter only the code shown by this collector at <b>github.com/login/device</b>, authorize Nose Calibration and check the displayed account. Never enter a code someone sends you. Signing in alone uploads nothing.', 642)
+y = text('<b>2. Consent, then Encrypt and share.</b> Read the notice and wait for the result. Numeric metrics may receive Codex advisory review; raw code, key presses and screenshots are not automatically sent to a model.', y)
+setup_detail(y-3, 720, 1170)
+y -= 285
+y = text('<b>Stored is not yet a receipt.</b> Encrypted data may be uploaded while organizer access is unconfirmed. The app cannot see pending invitations. Wait for acceptance, then share again to verify. A final receipt requires verified organizer access.', y, small)
+y = text('<b>Sign out or revoke.</b> The token stays in memory for at most eight hours; refresh tokens are discarded. Sign out or closing clears it locally, but does not revoke the grant. Use GitHub <b>Settings &gt; Applications &gt; Authorized GitHub Apps</b> to revoke Nose Calibration; use <b>Installed GitHub Apps</b> to manage its repository access. Remove Dhruvsa1 separately in repository settings. These actions do not erase copies already received.', y, small)
+y = text('<b>Return later.</b> Skip sharing to keep the recording local. <b>Earlier recordings</b> opens a saved session for retry without restarting capture. <b>Export session file</b> creates a readable ZIP: share it deliberately.', y, small)
+text('<b>Development preview:</b> selected-repository live authorization/upload and clean-machine installation remain unverified. If setup fails, contact the organizer; never post codes, tokens or recordings publicly. This preview is unsigned: verify unexpected Windows warnings with the organizer.', y, small)
 c.save()
 print(OUT)

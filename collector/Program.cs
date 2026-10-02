@@ -152,6 +152,18 @@ internal partial class CollectorForm : Form
                         finally { SendAccount(); }
                         break;
                     case "signout": uploadCancellation?.Cancel(); githubAuth?.Disconnect(); SendAccount(); break;
+                    case "github-setup":
+                        if (recording || sharing) throw new InvalidOperationException("Finish recording or sharing before opening GitHub setup.");
+                        // The web page chooses an action, never a URL. Keep destinations fixed.
+                        string setupAction = payload.GetProperty("action").GetString() ?? "";
+                        string setupUrl = setupAction switch {
+                            "create" => "https://github.com/new",
+                            "install" => "https://github.com/apps/" + GitHubAppAccess.PinnedSlug + "/installations/new",
+                            "invite" => "https://github.com/repos",
+                            _ => throw new InvalidOperationException("Unknown GitHub setup action.")
+                        };
+                        Process.Start(new ProcessStartInfo(setupUrl) { UseShellExecute = true });
+                        break;
                     case "list-sessions": ListSessions(); break;
                     case "load-session": LoadSession(payload.GetProperty("sessionId").GetString()); break;
                     case "share":
@@ -246,7 +258,8 @@ internal partial class CollectorForm : Form
             File.WriteAllText(receipt, JsonSerializer.Serialize(new { url, submittedAt = DateTime.UtcNow }));
             Send(new { kind = "receipt", url });
         }
-        catch (OperationCanceledException) { Send(new { kind = "notice", message = "Sharing stopped. Your local files remain, and remote work GitHub already accepted may remain. If repository creation was unconfirmed, arrange a handoff of this session's encrypted submission.nose with the organizer; keep the plaintext ZIP private." }); }
+        catch (GitHubSubmission.OrganizerAccessPending pending) { Send(new { kind = "notice", message = pending.Message }); }
+        catch (OperationCanceledException) { Send(new { kind = "notice", message = "Sharing stopped. Your local files remain. Share again to verify or resume; an existing remote submission is never overwritten." }); }
         finally { uploadCancellation = null; sharing = false; }
     }
     void SendAccount() => Send(new { kind = "account", login = githubAuth?.CurrentAccount?.Login, accountId = githubAuth?.CurrentAccount?.Id });

@@ -48,8 +48,8 @@ def verify(path):
             if len(data) != entry['bytes'] or hashlib.sha256(data).hexdigest() != entry['sha256']:
                 raise ValueError('Package digest mismatch')
         pin = json.loads((Path(__file__).resolve().parents[1]/'docs/security-pins.json').read_text())
-        if json.loads(files.get('oauth-client.json', b'{}').decode('utf-8-sig')) != {'clientId': pin['oauthClientId']}:
-            raise ValueError('OAuth application identifier pin mismatch')
+        if json.loads(files.get('oauth-client.json', b'{}').decode('utf-8-sig')) != {'clientId': pin['githubAppClientId'], 'appId': pin['githubAppId'], 'slug': pin['githubAppSlug']}:
+            raise ValueError('GitHub App registration pin mismatch')
         if any(name.startswith('vendor/') for name in files):
             raise ValueError('Collector must not include a bundled authentication CLI')
         key = files['public-key.pem']

@@ -1,5 +1,5 @@
 """Pure-data validation. Never extracts files, decodes images, or executes solutions."""
-import collections, hashlib, io, json, math, re, statistics, zipfile
+import collections, hashlib, io, json, math, re, statistics, struct, zipfile
 
 MAX_ZIP = 30 * 1024 * 1024
 KINDS = {'pointermove','pointerdown','pointerup','keydown','keyup','wheel','scroll','focus','selection','input','grade','question','screenshot'}
@@ -35,8 +35,36 @@ def jpeg_dimensions(data):
         i += n
     raise ValueError('JPEG dimensions not found')
 
+def preflight_directory(raw):
+    """Bound central-directory entry allocation before ZipFile creates objects.
+
+    Collector archives are single-disk, non-ZIP64, without trailing signatures.
+    Count actual headers too: trusting only the footer's declared count is unsafe.
+    """
+    end = raw.rfind(b'PK\x05\x06', max(0, len(raw) - 65557))
+    if end < 0 or end + 22 > len(raw): raise ValueError('Invalid ZIP directory')
+    # Python consults this locator before the 32-bit directory. It can be hidden
+    # inside a central entry comment; reject it before ZipFile can allocate.
+    if end >= 20 and raw[end - 20:end - 16] == b'PK\x06\x07':
+        raise ValueError('ZIP64 is not supported')
+    _, disk, start_disk, on_disk, count, size, offset, comment = struct.unpack_from('<4s4H2LH', raw, end)
+    if disk or start_disk or on_disk != count or count > 125 or end + 22 + comment != len(raw) or offset + size != end:
+        raise ValueError('Unsupported ZIP directory')
+    position = offset
+    actual = 0
+    while position < end:
+        actual += 1
+        if actual > 125 or position + 46 > end or raw[position:position + 4] != b'PK\x01\x02':
+            raise ValueError('Too many or invalid directory entries')
+        name, extra, note = struct.unpack_from('<3H', raw, position + 28)
+        position += 46 + name + extra + note
+        if position > end: raise ValueError('Truncated directory entry')
+    if actual != count: raise ValueError('Directory entry count mismatch')
+
+
 def validate(raw, session_id):
     if len(raw)>MAX_ZIP: raise ValueError('Compressed bundle too large')
+    preflight_directory(raw)
     metrics={}; flags=[]
     with zipfile.ZipFile(io.BytesIO(raw)) as z:
         entries=z.infolist(); names=[i.filename for i in entries]
