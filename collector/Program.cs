@@ -8,7 +8,15 @@ using System.Text.Json;
 namespace NoseCalibration;
 internal static class Program
 {
-    [STAThread] static void Main(string[] args) { ApplicationConfiguration.Initialize(); Application.Run(new CollectorForm(args.Contains("--verification"))); }
+    [STAThread] static void Main(string[] args)
+    {
+        // Keep a named handle alive for the entire process lifetime. Setup and
+        // uninstall check it before touching program files; this is not a
+        // single-instance lock and does not change normal multi-window use.
+        using var installationGuard = new System.Threading.Mutex(false, @"Local\NoseCalibration.Collector.Running");
+        ApplicationConfiguration.Initialize();
+        Application.Run(new CollectorForm(args.Contains("--verification")));
+    }
 }
 internal partial class CollectorForm : Form
 {
