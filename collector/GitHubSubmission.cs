@@ -79,7 +79,10 @@ internal static class GitHubSubmission
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             timeout.CancelAfter(TimeSpan.FromMinutes(5));
             using var request = new HttpRequestMessage(method, "https://api.github.com" + path);
-            request.Headers.Accept.ParseAdd(raw ? "application/vnd.github.raw+json" : "application/vnd.github+json");
+            // Contents responses over 1 MB require the object media type for
+            // metadata; payload integrity is checked separately with raw blobs.
+            bool contentsMetadata = method == HttpMethod.Get && path.EndsWith("/contents/submission.nose", StringComparison.Ordinal);
+            request.Headers.Accept.ParseAdd(raw ? "application/vnd.github.raw+json" : contentsMetadata ? "application/vnd.github.object+json" : "application/vnd.github+json");
             request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
             if (body != null) request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
             if (tokenProvider != null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokenProvider());

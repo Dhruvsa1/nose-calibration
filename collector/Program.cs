@@ -28,6 +28,7 @@ internal partial class CollectorForm : Form
     [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
     partial void ConfigureAdmin();
     partial void AdminCommand(string command, JsonElement payload);
+    partial void AllowHumanStart(ref bool allowed);
     internal CollectorForm(bool verification = false)
     {
         mode = verification ? "verification" : "human";
@@ -108,7 +109,7 @@ internal partial class CollectorForm : Form
                 switch (command)
                 {
                     case "ready": Send(new { kind = "edition", mode = Text.Contains("Admin") ? "admin" : "collector" }); SendAccount(); ListSessions(); break;
-                    case "start": if (payload.GetProperty("consent").GetBoolean()) StartSession(); break;
+                    case "start": bool allowed = true; AllowHumanStart(ref allowed); if (allowed && payload.GetProperty("consent").GetBoolean()) StartSession(); break;
                     case "events":
                         if (!recording || GetForegroundWindow() != Handle || !ContainsFocus) break;
                         var batch = payload.GetProperty("events");

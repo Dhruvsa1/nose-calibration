@@ -16,6 +16,7 @@ Local sessions are stored under `%LOCALAPPDATA%/NoseCalibration/sessions`. `--ve
 - Browser walkthrough: all five answers correct, score 5/5, no JavaScript errors; this used a mocked native bridge and is not a Codex input-profile evaluation.
 - Native walkthrough: start/stop, question navigation, syntax rendering, a correct coding solution, page screenshot capture and recording files verified. The native smoke test is marked `verification`.
 - Claude Code Opus 5.5, high effort, authored the visual HTML/CSS and UI enhancements. Two Opus sessions inspected all 30 manually filtered tutorial UI frames. Reference captures and review evidence remain local under ignored `work/`.
+- Large-file transport: a 2 MB synthetic encrypted payload was uploaded to a private test repository using GitHub's numeric repository routes. Object-media contents metadata and raw-blob SHA-256 verification passed. This used the administrator's existing managed GitHub CLI login; it does not verify the collector's device sign-in or collaborator invitation flow. Contents metadata requests explicitly use `application/vnd.github.object+json` for files over 1 MB.
 
 ## Release work still required
 

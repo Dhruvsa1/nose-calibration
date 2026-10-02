@@ -31,6 +31,8 @@ internal sealed class FakeGitHub : HttpMessageHandler
         if(p=="/repositories/987")return Json(Repo());
         if(p.EndsWith("/contents/submission.nose"))
         {
+            if(r.Method==HttpMethod.Get && !r.Headers.Accept.Any(v=>v.MediaType=="application/vnd.github.object+json"))
+                throw new Exception("Large submission metadata requires GitHub object media type");
             if(r.Method==HttpMethod.Put)
             {
                 Uploads++;using var doc=JsonDocument.Parse(await r.Content!.ReadAsStringAsync(ct));
