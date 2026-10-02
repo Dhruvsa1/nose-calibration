@@ -1,0 +1,47 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using NoseCalibration;
+internal class Harness
+{
+    static void Check(bool value,string message) { if(!value)throw new Exception(message); }
+    static void Reject(Action action,string message) { try {action();}catch{return;}throw new Exception("Accepted "+message); }
+    static async Task Main()
+    {
+        string root=Path.Combine(Path.GetTempPath(),"nose-sessions-test-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
+        string id=new string('a',32),folder=Path.Combine(root,id),zip=Path.Combine(root,id+".zip");Directory.CreateDirectory(folder);
+        void Summary(long events=1,long shots=1,string mode="human")=>File.WriteAllText(Path.Combine(folder,"summary.json"),JsonSerializer.Serialize(new{eventCount=events,screenshotCount=shots,mode}));
+        try
+        {
+            File.WriteAllText(Path.Combine(folder,"manifest.json"),JsonSerializer.Serialize(new{sessionId=id,consent=true,schemaVersion=1,mode="human"}));Summary();
+            File.WriteAllText(Path.Combine(folder,"answers.json"),"{\"values\":[\"synthetic\"]}");
+            var current=CollectorSessionFiles.ReadCompleted(root,id);Check(current.Mode=="human" && current.EventCount==1 && current.Answers.HasValue,"completed session read");
+            var original=current;
+            Summary(250001);Reject(()=>current=CollectorSessionFiles.ReadCompleted(root,id),"invalid counter");Check(current==original,"counter failure changed active selection");Summary();
+            File.WriteAllText(Path.Combine(folder,"answers.json"),"{broken");Reject(()=>current=CollectorSessionFiles.ReadCompleted(root,id),"late malformed answer");Check(current==original,"late failure changed active selection");
+            File.WriteAllText(Path.Combine(folder,"answers.json"),new string('x',200001));Reject(()=>current=CollectorSessionFiles.ReadCompleted(root,id),"oversized answers");Check(current==original,"oversize changed active selection");
+            File.Delete(Path.Combine(folder,"answers.json"));Check(CollectorSessionFiles.ReadCompleted(root,id).Answers==null,"optional answers");
+            Summary(mode:"codex");Reject(()=>CollectorSessionFiles.ReadCompleted(root,id),"summary mode mismatch");Summary();
+            Reject(()=>CollectorSessionFiles.ReadCompleted(root,"../"+id),"path traversal");
+            byte[] bytes={1,2,3,4};File.WriteAllBytes(zip,bytes);string digest=Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            File.WriteAllText(Path.Combine(folder,"upload-state.json"),JsonSerializer.Serialize(new{Version=2,SessionId=id,ZipSha256=digest}));
+            Check(CollectorSessionFiles.FrozenBundle(folder,zip)==zip && File.ReadAllBytes(zip).SequenceEqual(bytes),"frozen archive reused unchanged");
+            File.WriteAllText(Path.Combine(folder,"answers.json"),"{\"values\":[\"edited later\"]}");Check(CollectorSessionFiles.FrozenBundle(folder,zip)==zip && File.ReadAllBytes(zip).SequenceEqual(bytes),"changed session files cannot rebuild upload archive");
+            File.AppendAllText(zip,"tamper");var tampered=File.ReadAllBytes(zip);Reject(()=>CollectorSessionFiles.FrozenBundle(folder,zip),"altered archive");Check(File.ReadAllBytes(zip).SequenceEqual(tampered),"altered archive was overwritten");
+            File.Delete(zip);Reject(()=>CollectorSessionFiles.FrozenBundle(folder,zip),"missing archive");Check(!File.Exists(zip),"missing archive recreated");
+            foreach(bool switchSession in new[]{false,true})
+            {
+                string activeSession=id;bool recording=true;int completed=0;
+                var writing=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var release=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var capture=CollectorSessionFiles.WriteSnapshot(folder,"click-00000001.jpg",new byte[]{1,2,3},()=>recording && activeSession==id,()=>completed++,async(path,data)=>{await File.WriteAllBytesAsync(path,data);writing.SetResult();await release.Task;});
+                await writing.Task; if(switchSession)activeSession=new string('b',32);else recording=false;
+                release.SetResult();await capture;
+                Check(completed==0 && !File.Exists(Path.Combine(folder,"click-00000001.jpg")) && !File.Exists(Path.Combine(folder,"click-00000001.jpg.pending")),"late capture mutated replacement/stopped session or left data");
+            }
+            int captures=0;await CollectorSessionFiles.WriteSnapshot(folder,"click-00000002.jpg",new byte[]{1,2,3},()=>true,()=>captures++);
+            Check(captures==1 && File.Exists(Path.Combine(folder,"click-00000002.jpg")),"current capture commits exactly once");
+            Console.WriteLine("PASS: session validation and immutable ZIP; late capture discarded after stop/session change with no callback or orphan; current capture commits once.");
+        }
+        finally{Directory.Delete(root,true);}
+    }
+}

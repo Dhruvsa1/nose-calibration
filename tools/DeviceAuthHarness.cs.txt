@@ -1,0 +1,129 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using NoseCalibration;
+
+internal class Fake : HttpMessageHandler
+{
+    internal readonly Queue<string> Replies = new();
+    internal readonly List<(string Url, string Body, string? Auth)> Calls = new();
+    internal HttpStatusCode Status = HttpStatusCode.OK;
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
+    {
+        Calls.Add((request.RequestUri!.AbsoluteUri, request.Content == null ? "" : await request.Content.ReadAsStringAsync(cancellation), request.Headers.Authorization?.Parameter));
+        return new HttpResponseMessage(Status) { Content = new StringContent(Replies.Dequeue(), Encoding.UTF8, "application/json") };
+    }
+}
+internal class Harness
+{
+    const string Token = "gho_syntheticTESTtoken00000000000000000000";
+    const string Device = "{\"device_code\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"user_code\":\"ABCD-EFGH\",\"verification_uri\":\"https://github.com/login/device\",\"expires_in\":900,\"interval\":5}";
+    static string Success(string scope="repo", int? expiry=null) => JsonSerializer.Serialize(new { access_token=Token,token_type="bearer",scope,expires_in=expiry??28800 });
+    const string Identity = "{\"id\":123,\"login\":\"synthetic-user\",\"type\":\"User\"}";
+    static void Check(bool ok, string why) { if (!ok) throw new Exception(why); }
+    static async Task Reject(Func<Task> action, string why) { try { await action(); } catch (InvalidOperationException e) { Check(!e.Message.Contains(Token), "Token in error"); return; } throw new Exception("Accepted " + why); }
+    static Fake Responses(params string[] values) { var fake = new Fake(); foreach (var v in values) fake.Replies.Enqueue(v); return fake; }
+    static async Task Main()
+    {
+        string config = Path.Combine(Path.GetTempPath(), "nose-auth-synthetic-"+Guid.NewGuid().ToString("N")+".json");
+        File.WriteAllText(config,"{\"clientId\":\"0123456789abcdef0123\"}");
+        int count=0;
+        try
+        {
+            await Reject(()=>{using var production=new GitHubDeviceAuth(config);return Task.CompletedTask;},"production OAuth client pin mismatch");count++;
+            var waits = new List<double>(); var statuses=new List<string>(); Uri? opened=null;
+            var fake=Responses(Device,"{\"error\":\"authorization_pending\"}","{\"error\":\"slow_down\"}",Success(),Identity);
+            using(var auth = new GitHubDeviceAuth(config,fake,u=>opened=u,(d,ct)=>{waits.Add(d.TotalSeconds);return Task.CompletedTask;}))
+            {
+                await Reject(()=>Task.FromResult(auth.RequireToken()),"token before sign-in");
+                var account=await auth.SignIn(statuses.Add);
+                Check(account.Id==123 && account.Login=="synthetic-user" && auth.CurrentAccount==account && auth.RequireToken()==Token,"verified identity");
+                Check(waits.SequenceEqual(new double[]{5,5,10}),"poll interval/slow_down");
+                Check(opened!.AbsoluteUri=="https://github.com/login/device","fixed browser URL");
+                Check(statuses.All(s=>!s.Contains(Token) && !s.Contains(new string('a',40))),"secret in status");
+                Check(fake.Calls[0].Body.Contains("scope=repo") && !fake.Calls.Any(c=>c.Body.Contains("client_secret")),"scope/client secret");
+                Check(fake.Calls.Take(4).All(c=>c.Auth==null) && fake.Calls[4].Auth==Token && fake.Calls[4].Url=="https://api.github.com/user","token endpoint boundary");
+                auth.Disconnect(); Check(auth.CurrentAccount==null,"disconnect identity"); await Reject(()=>Task.FromResult(auth.RequireToken()),"token after disconnect");
+                count++;
+            }
+            foreach (var response in new[]{Device.Replace("https://github.com/login/device","https://attacker.example/device"),Device.Replace("900","901"),Device.Replace("ABCD-EFGH","bad"),Device.Replace("\"interval\":5","\"interval\":0"),Device.Replace("\"interval\":5","\"interval\":5,\"interval\":6"),new string('x',65537)})
+            {
+                bool browser=false; var f=Responses(response);
+                using var auth=new GitHubDeviceAuth(config,f,_=>browser=true,(_,_)=>Task.CompletedTask);
+                await Reject(()=>auth.SignIn(_=>{}),"bad device response"); Check(!browser && auth.CurrentAccount==null && f.Calls.Count==1,"bad response side effect"); count++;
+            }
+            foreach(var response in new[]{"{\"error\":\"access_denied\"}","{\"error\":\"expired_token\"}","{\"error\":\"incorrect_client_credentials\"}",Success("repo,gist"),Success(""),Success().Replace("bearer","other")})
+            {
+                var f=Responses(Device,response); using var auth=new GitHubDeviceAuth(config,f,_=>{},(_,_)=>Task.CompletedTask);
+                await Reject(()=>auth.SignIn(_=>{}),"denial or invalid token"); Check(auth.CurrentAccount==null && f.Calls.Count==2,"invalid token used"); count++;
+            }
+            {
+                var f=Responses(Device,Success(),Identity.Replace("123","0")); using var auth=new GitHubDeviceAuth(config,f,_=>{},(_,_)=>Task.CompletedTask);
+                await Reject(()=>auth.SignIn(_=>{}),"invalid identity"); await Reject(()=>Task.FromResult(auth.RequireToken()),"unverified token");count++;
+            }
+            {
+                var f=Responses("{}");f.Status=HttpStatusCode.Redirect;
+                using var auth=new GitHubDeviceAuth(config,f,_=>{},(_,_)=>Task.CompletedTask);
+                await Reject(()=>auth.SignIn(_=>{}),"redirect");Check(f.Calls.Count==1,"redirect followed");count++;
+            }
+            {
+                var clock=DateTimeOffset.UtcNow; var f=Responses(Device);
+                using var auth=new GitHubDeviceAuth(config,f,_=>{},(d,ct)=>{clock=clock.AddSeconds(901);return Task.CompletedTask;},()=>clock);
+                await Reject(()=>auth.SignIn(_=>{}),"device timeout");Check(f.Calls.Count==1,"polled expired code");count++;
+            }
+            {
+                var clock=DateTimeOffset.UtcNow; var f=Responses(Device,Success(expiry:10),Identity);
+                using var auth=new GitHubDeviceAuth(config,f,_=>{},(_,_)=>Task.CompletedTask,()=>clock);
+                await auth.SignIn(_=>{});clock=clock.AddSeconds(11);await Reject(()=>Task.FromResult(auth.RequireToken()),"expired access token");Check(auth.CurrentAccount==null,"expired account");count++;
+            }
+            foreach(var response in new[]{Success(expiry:86400),JsonSerializer.Serialize(new {access_token=Token,token_type="bearer",scope="repo"})})
+            {
+                var clock=DateTimeOffset.UtcNow; var f=Responses(Device,response,Identity);
+                using var auth=new GitHubDeviceAuth(config,f,_=>{},(_,_)=>Task.CompletedTask,()=>clock);
+                await auth.SignIn(_=>{});clock=clock.AddHours(8).AddSeconds(1);
+                await Reject(()=>Task.FromResult(auth.RequireToken()),"eight-hour local lifetime cap");Check(auth.CurrentAccount==null,"capped account expiry");count++;
+            }
+            {
+                var f=Responses(Device,Success(expiry:1),Identity);
+                using var auth=new GitHubDeviceAuth(config,f,_=>{},(_,_)=>Task.CompletedTask);
+                await auth.SignIn(_=>{});var authorization=auth.AcquireAuthorization();
+                var expired=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                using var registration=authorization.Lifetime.Register(()=>expired.TrySetResult());
+                await expired.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                // No auth getter was called to trigger lazy expiry: timer did this.
+                var stored=typeof(GitHubDeviceAuth).GetField("token",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(auth);
+                Check(stored==null && authorization.Lifetime.IsCancellationRequested,"idle token actively erased/cancelled");
+                count++;
+            }
+            {
+                var clock=DateTimeOffset.UtcNow;var callbacks=new List<Action>();
+                var f=Responses(Device,Success(),Identity,Device,Success(),Identity);
+                using var auth=new GitHubDeviceAuth(config,f,_=>{},(_,_)=>Task.CompletedTask,()=>clock,(_,callback)=>{callbacks.Add(callback);return new System.Threading.Timer(_=>{},null,Timeout.Infinite,Timeout.Infinite);});
+                await auth.SignIn(_=>{});var first=auth.AcquireAuthorization();
+                await auth.SignIn(_=>{});var second=auth.AcquireAuthorization();
+                Check(first.Lifetime.IsCancellationRequested,"new sign-in revokes old authorization");
+                callbacks[0]();Check(!second.Lifetime.IsCancellationRequested,"old timer cannot clear replacement token");
+                clock=clock.AddHours(9);bool cancelled=false;try{second.RequireToken();}catch(OperationCanceledException){cancelled=true;}
+                Check(cancelled && second.Lifetime.IsCancellationRequested,"per-request expiry independent of timer scheduling");count++;
+            }
+            {
+                var entered=new TaskCompletionSource();var f=Responses(Device);
+                using var auth=new GitHubDeviceAuth(config,f,_=>{},async (_,ct)=>{entered.SetResult();await Task.Delay(Timeout.Infinite,ct);});
+                var first=auth.SignIn(_=>{});await entered.Task;
+                await Reject(()=>auth.SignIn(_=>{}),"concurrent sign-in");auth.Disconnect();await Reject(()=>first,"disconnect cancellation");Check(auth.CurrentAccount==null,"cancelled identity");count++;
+            }
+            {
+                var f=Responses(Device); using var cancel=new CancellationTokenSource();cancel.Cancel();
+                using var auth=new GitHubDeviceAuth(config,f,_=>{},(_,ct)=>{ct.ThrowIfCancellationRequested();return Task.CompletedTask;});
+                await Reject(()=>auth.SignIn(_=>{},cancel.Token),"external cancellation");count++;
+            }
+            foreach(var configText in new[]{"{}","{\"clientId\":\"not-set\"}","{\"clientId\":\"0123456789abcdef0123\",\"client_secret\":\"not-allowed\"}",new string('x',4097)})
+            {
+                File.WriteAllText(config,configText);
+                await Reject(()=>{using var auth=new GitHubDeviceAuth(config,Responses(),_=>{});return Task.CompletedTask;},"invalid client config");count++;
+            }
+            Console.WriteLine($"PASS: {count} offline device authentication scenarios; no network, browser or real credentials.");
+        }
+        finally { File.Delete(config); }
+    }
+}

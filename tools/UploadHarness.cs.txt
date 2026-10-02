@@ -1,0 +1,173 @@
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using NoseCalibration;
+namespace NoseCalibration { internal static class CollectorForm { internal static string DataRoot => throw new Exception("Real auth config forbidden in test"); } }
+internal sealed class FakeGitHub : HttpMessageHandler
+{
+    internal bool Exists, Public, FailCreate, FailUpload, WrongPermission, Redirect;
+    internal long Owner = 42;
+    internal int Creates, Uploads, Invitations;
+    internal HttpStatusCode? CreateStatus;
+    internal string? BlockPath;
+    internal Action<string>? BeforeRequest;
+    internal readonly TaskCompletionSource Blocked = new();
+    internal byte[]? Payload;
+    readonly string name;
+    internal FakeGitHub(string session) { name="nose-calibration-submission-"+session; }
+    object Repo() => new {id=987L,name,@private=!Public,owner=new{id=Owner,type="User"},created_at=DateTimeOffset.UtcNow};
+    static HttpResponseMessage Json(object data,HttpStatusCode status=HttpStatusCode.OK) => new(status){Content=new StringContent(JsonSerializer.Serialize(data))};
+    static HttpResponseMessage Missing() => new(HttpStatusCode.NotFound);
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage r,CancellationToken ct)
+    {
+        string p=r.RequestUri!.AbsolutePath;
+        BeforeRequest?.Invoke(p);
+        if(p==BlockPath) { Blocked.TrySetResult(); await Task.Delay(Timeout.Infinite,ct); }
+        if(Redirect)return new(HttpStatusCode.Redirect){Headers={Location=new Uri("https://example.invalid/")}};
+        if(p=="/user")return Json(new{id=Owner,login="participant"});
+        if(p.StartsWith("/repos/"))return Exists?Json(Repo()):Missing();
+        if(p=="/user/repos") { Creates++;if(CreateStatus.HasValue)return new(CreateStatus.Value);Exists=true;if(FailCreate){FailCreate=false;throw new HttpRequestException("simulated lost create response");}return Json(Repo(),HttpStatusCode.Created); }
+        if(p=="/repositories/987")return Json(Repo());
+        if(p.EndsWith("/contents/submission.nose"))
+        {
+            if(r.Method==HttpMethod.Put)
+            {
+                Uploads++;using var doc=JsonDocument.Parse(await r.Content!.ReadAsStringAsync(ct));
+                Payload=Convert.FromBase64String(doc.RootElement.GetProperty("content").GetString()!);
+                if(FailUpload){FailUpload=false;throw new HttpRequestException("simulated lost upload response");}
+                return Json(new{});
+            }
+            if(Payload==null)return Missing();
+            byte[] prefix=Encoding.ASCII.GetBytes("blob "+Payload.Length+"\0");
+            string sha=Convert.ToHexString(SHA1.HashData(prefix.Concat(Payload).ToArray())).ToLowerInvariant();
+            return Json(new{type="file",path="submission.nose",size=Payload.Length,sha});
+        }
+        if(p.Contains("/git/blobs/"))return new(HttpStatusCode.OK){Content=new ByteArrayContent(Payload!)};
+        if(p=="/users/"+GitHubSubmission.Researcher)return Json(new{id=GitHubSubmission.ResearcherId});
+        if(p.EndsWith("/collaborators/"+GitHubSubmission.Researcher))
+        {
+            Invitations++;
+            using var doc=JsonDocument.Parse(await r.Content!.ReadAsStringAsync(ct));
+            if(doc.RootElement.GetProperty("permission").GetString()!="push")throw new Exception("Must disclose and request write");
+            return Json(new{invitee=new{id=GitHubSubmission.ResearcherId},permissions=WrongPermission?"read":"write"},HttpStatusCode.Created);
+        }
+        throw new Exception("Unexpected fake request: "+p);
+    }
+}
+internal sealed class AuthResponses : HttpMessageHandler
+{
+    int request;
+    internal int Seconds = 1;
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r,CancellationToken ct)
+    {
+        object data = ++request switch
+        {
+            1 => new {device_code=new string('a',40),user_code="ABCD-EFGH",verification_uri="https://github.com/login/device",expires_in=900,interval=5},
+            2 => new {access_token="gho_syntheticTESTtoken00000000000000000000",token_type="bearer",scope="repo",expires_in=Seconds},
+            _ => new {id=42,login="participant",type="User"}
+        };
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(JsonSerializer.Serialize(data))});
+    }
+}
+internal static class Harness
+{
+    static void Check(bool value,string label){if(!value)throw new Exception(label);}
+    static async Task Rejected(Func<Task> action,string label){bool rejected=false;try{await action();}catch{rejected=true;}Check(rejected,label);}
+    static async Task Main()
+    {
+        string temp=Path.Combine(Path.GetTempPath(),"nose-upload-test-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(temp);
+        try
+        {
+            using var rsa=RSA.Create(2048);string pem=Path.Combine(temp,"test-public.pem");await File.WriteAllTextAsync(pem,rsa.ExportSubjectPublicKeyInfoPem());
+            string MakeRun(char c){string d=Path.Combine(temp,new string(c,32));Directory.CreateDirectory(d);File.WriteAllBytes(Path.Combine(d,"test.zip"),new byte[]{1,2,3});return d;}
+            string ambiguous=MakeRun('e');var lostCreate=new FakeGitHub(Path.GetFileName(ambiguous)){FailCreate=true};using var lostCreateHttp=new HttpClient(lostCreate);
+            Task<string> Ambiguous()=>GitHubSubmission.UploadCore(Path.Combine(ambiguous,"test.zip"),ambiguous,lostCreateHttp,pem);
+            await Rejected(async()=>await Ambiguous(),"lost create response");
+            byte[] preserved=File.ReadAllBytes(Path.Combine(ambiguous,"submission.nose"));
+            await Rejected(async()=>await Ambiguous(),"ambiguous named repository not adopted");
+            lostCreate.Exists=false;await Rejected(async()=>await Ambiguous(),"ambiguous missing repository not recreated");
+            lostCreate.Exists=true;await Rejected(async()=>await Ambiguous(),"replacement named repository not adopted");
+            Check(lostCreate.Creates==1 && lostCreate.Uploads==0 && lostCreate.Invitations==0,"ambiguous create never uploads or invites");
+            Check(preserved.SequenceEqual(File.ReadAllBytes(Path.Combine(ambiguous,"submission.nose"))) && File.Exists(Path.Combine(ambiguous,"test.zip")),"ambiguous create preserves original data");
+            string run=MakeRun('a');var fake=new FakeGitHub(Path.GetFileName(run)){FailUpload=true};using var http=new HttpClient(fake);
+            Task<string> Upload()=>GitHubSubmission.UploadCore(Path.Combine(run,"test.zip"),run,http,pem);
+            await Rejected(async()=>await Upload(),"lost upload response");
+            byte[] encrypted=File.ReadAllBytes(Path.Combine(run,"submission.nose"));
+            await Upload();await Upload();
+            Check(fake.Creates==1 && fake.Uploads==1,"retries neither recreate repository nor overwrite payload");
+            Check(encrypted.SequenceEqual(fake.Payload!) && encrypted.SequenceEqual(File.ReadAllBytes(Path.Combine(run,"submission.nose"))),"persisted ciphertext stable");
+            fake.Owner=43;await Rejected(async()=>await Upload(),"different immutable account rejected");fake.Owner=42;
+            fake.Public=true;await Rejected(async()=>await Upload(),"public repository rejected");fake.Public=false;
+            fake.Payload![0]^=1;await Rejected(async()=>await Upload(),"changed remote payload rejected");Check(fake.Uploads==1,"no mismatch overwrite");
+            fake.Payload=encrypted;File.AppendAllText(Path.Combine(run,"test.zip"),"changed");await Rejected(async()=>await Upload(),"changed local ZIP rejected");
+            string collision=MakeRun('b');using var collisionHttp=new HttpClient(new FakeGitHub(Path.GetFileName(collision)){Exists=true});
+            await Rejected(async()=>await GitHubSubmission.UploadCore(Path.Combine(collision,"test.zip"),collision,collisionHttp,pem),"preexisting name not adopted");
+            string permission=MakeRun('c');using var permissionHttp=new HttpClient(new FakeGitHub(Path.GetFileName(permission)){WrongPermission=true});
+            await Rejected(async()=>await GitHubSubmission.UploadCore(Path.Combine(permission,"test.zip"),permission,permissionHttp,pem),"wrong collaborator permission rejected");
+            string redirect=MakeRun('d');using var redirectHttp=new HttpClient(new FakeGitHub(Path.GetFileName(redirect)){Redirect=true});
+            await Rejected(async()=>await GitHubSubmission.UploadCore(Path.Combine(redirect,"test.zip"),redirect,redirectHttp,pem),"redirect response rejected");
+            using var big=new ByteArrayContent(new byte[20]);await Rejected(async()=>await GitHubSubmission.ReadBounded(big,10,CancellationToken.None),"response size bound");
+            foreach(var status in new[]{HttpStatusCode.BadRequest,HttpStatusCode.Unauthorized,HttpStatusCode.Forbidden,HttpStatusCode.NotFound,HttpStatusCode.UnprocessableEntity,HttpStatusCode.TooManyRequests})
+            {
+                string rejected=Path.Combine(temp,Guid.NewGuid().ToString("N"));Directory.CreateDirectory(rejected);File.WriteAllBytes(Path.Combine(rejected,"test.zip"),new byte[]{1,2,3});
+                var denied=new FakeGitHub(Path.GetFileName(rejected)){CreateStatus=status};using var deniedHttp=new HttpClient(denied);
+                Task<string> Retry()=>GitHubSubmission.UploadCore(Path.Combine(rejected,"test.zip"),rejected,deniedHttp,pem);
+                await Rejected(async()=>await Retry(),"explicit create rejection");
+                var state=JsonSerializer.Deserialize<GitHubSubmission.UploadState>(File.ReadAllText(Path.Combine(rejected,"upload-state.json")))!;
+                Check(!state.CreationPending && state.CreationStartedAt==null,"explicit rejection clears pending");
+                denied.CreateStatus=null;await Retry();Check(denied.Creates==2 && denied.Uploads==1 && denied.Invitations==1,"explicit rejection retry succeeds");
+            }
+            foreach(var status in new[]{HttpStatusCode.RequestTimeout,HttpStatusCode.InternalServerError,HttpStatusCode.BadGateway})
+            {
+                string failed=Path.Combine(temp,Guid.NewGuid().ToString("N"));Directory.CreateDirectory(failed);File.WriteAllBytes(Path.Combine(failed,"test.zip"),new byte[]{1,2,3});
+                var server=new FakeGitHub(Path.GetFileName(failed)){CreateStatus=status};using var serverHttp=new HttpClient(server);
+                Task<string> Retry()=>GitHubSubmission.UploadCore(Path.Combine(failed,"test.zip"),failed,serverHttp,pem);
+                await Rejected(async()=>await Retry(),"unknown server outcome");server.CreateStatus=null;await Rejected(async()=>await Retry(),"ambiguous outcome retry denied");
+                Check(server.Creates==1 && server.Uploads==0,"ambiguous outcome never recreated");
+            }
+            foreach(string block in new[]{"/user","/user/repos","/repositories/987/contents/submission.nose","/users/"+GitHubSubmission.Researcher})
+            {
+                string cancelled=Path.Combine(temp,Guid.NewGuid().ToString("N"));Directory.CreateDirectory(cancelled);File.WriteAllBytes(Path.Combine(cancelled,"test.zip"),new byte[]{1,2,3});
+                var blocked=new FakeGitHub(Path.GetFileName(cancelled)){BlockPath=block};using var blockedHttp=new HttpClient(blocked);using var cancellation=new CancellationTokenSource();
+                var upload=GitHubSubmission.UploadCore(Path.Combine(cancelled,"test.zip"),cancelled,blockedHttp,pem,cancellation.Token);
+                await blocked.Blocked.Task.WaitAsync(TimeSpan.FromSeconds(5));cancellation.Cancel();
+                bool wasCancelled=false;try{await upload.WaitAsync(TimeSpan.FromSeconds(5));}catch(OperationCanceledException){wasCancelled=true;}
+                Check(wasCancelled && blocked.Invitations==0,"cancellation propagates and prevents invitation");
+                if(block=="/user/repos")
+                {
+                    blocked.BlockPath=null;await Rejected(async()=>await GitHubSubmission.UploadCore(Path.Combine(cancelled,"test.zip"),cancelled,blockedHttp,pem),"cancelled creation remains ambiguous");
+                    Check(blocked.Uploads==0,"cancelled creation no upload");
+                }
+            }
+            string authConfig=Path.Combine(temp,"auth-client.json");File.WriteAllText(authConfig,"{\"clientId\":\"0123456789abcdef0123\"}");
+            {
+                string pinned=MakeRun('8');var pinnedFake=new FakeGitHub(Path.GetFileName(pinned));using var pinnedHttp=new HttpClient(pinnedFake);
+                await GitHubSubmission.UploadCore(Path.Combine(pinned,"test.zip"),pinned,pinnedHttp,Path.Combine(temp,"missing-replaced-key.pem"),verifiedPublicKey:rsa.ExportSubjectPublicKeyInfoPem());
+                byte[] envelope=File.ReadAllBytes(Path.Combine(pinned,"submission.nose"));int headerEnd=Array.IndexOf(envelope,(byte)'\n',6);
+                using var header=JsonDocument.Parse(envelope.AsMemory(6,headerEnd-6));
+                byte[] aesKey=rsa.Decrypt(Convert.FromBase64String(header.RootElement.GetProperty("wrappedKey").GetString()!),RSAEncryptionPadding.OaepSHA256);
+                Check(aesKey.Length==32,"verified in-memory key used without rereading replaced path");CryptographicOperations.ZeroMemory(aesKey);
+            }
+            {
+                using var auth=new GitHubDeviceAuth(authConfig,new AuthResponses(),_=>{},(_,_)=>Task.CompletedTask);
+                await auth.SignIn(_=>{});var authorization=auth.AcquireAuthorization();
+                string expiring=MakeRun('f');var blocked=new FakeGitHub(Path.GetFileName(expiring)){BlockPath="/repositories/987/contents/submission.nose"};using var blockedHttp=new HttpClient(blocked);
+                var upload=GitHubSubmission.UploadCore(Path.Combine(expiring,"test.zip"),expiring,blockedHttp,pem,authorization.Lifetime,authorization.RequireToken);
+                await blocked.Blocked.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                bool expired=false;try{await upload.WaitAsync(TimeSpan.FromSeconds(5));}catch(OperationCanceledException){expired=true;}
+                Check(expired && authorization.Lifetime.IsCancellationRequested && blocked.Uploads==0 && blocked.Invitations==0,"active auth expiry cancels in-flight request and later writes");
+            }
+            {
+                var clock=DateTimeOffset.UtcNow;
+                using var auth=new GitHubDeviceAuth(authConfig,new AuthResponses{Seconds=28800},_=>{},(_,_)=>Task.CompletedTask,()=>clock,(_,_)=>new System.Threading.Timer(_=>{},null,Timeout.Infinite,Timeout.Infinite));
+                await auth.SignIn(_=>{});var authorization=auth.AcquireAuthorization();
+                string expiring=MakeRun('9');var expiry=new FakeGitHub(Path.GetFileName(expiring)){BeforeRequest=path=>{if(path.StartsWith("/repos/"))clock=clock.AddHours(9);}};using var expiryHttp=new HttpClient(expiry);
+                await Rejected(async()=>await GitHubSubmission.UploadCore(Path.Combine(expiring,"test.zip"),expiring,expiryHttp,pem,authorization.Lifetime,authorization.RequireToken),"expiry checked before next request even when timer delayed");
+                Check(expiry.Creates==0 && expiry.Uploads==0 && expiry.Invitations==0,"no request with stale token after expiry");
+            }
+            Console.WriteLine("PASS: upload recovery/4xx/cancellation/security checks; real auth expiry cancels active upload; per-request token validation prevents post-expiry writes even with delayed timer.");
+        }
+        finally {Directory.Delete(temp,true);}
+    }
+}
