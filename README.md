@@ -24,7 +24,7 @@ Local sessions are stored under `%LOCALAPPDATA%/NoseCalibration/sessions`. `--ve
 
 The upload implementation is not approved for distribution. Offline tests cover selected-repository GitHub App device sign-in, immutable repository identity, encrypted retry recovery, collaborator permission verification, cancellation and saved-session validation. Live authorization/upload with this App, clean-machine installation and final security review remain required. The registered App is pinned to App ID `5167786`, client ID `Iv23li4JwAA8Kc5EWiCM` and slug `nose-calibration`. Its only repository permissions are **Contents: read and write** and **Metadata: read-only**. The collector requires an installation selecting exactly the participant's private personal repository `nose-calibration-submissions`.
 
-Access tokens stay in memory for at most eight hours; refresh tokens are discarded. The collector does not read GitHub CLI credentials. `oauth-client.json` contains public registration identifiers, not a secret. Registration is complete, but installation without an App private key remains unverified; a registration-page banner is not a participant setup instruction.
+Access tokens stay in memory for at most eight hours; refresh tokens are discarded. The collector does not read GitHub CLI credentials. `oauth-client.json` contains public registration identifiers, not a secret. Registration and installation on the organizer's single selected private inbox succeeded without generating an App private key or client secret. The Collector's live device authorization and upload are separate release checks and remain pending.
 
 ## Optional sharing: first time
 
