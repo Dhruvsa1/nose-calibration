@@ -147,5 +147,11 @@ class VerifyPackageTests(unittest.TestCase):
         # Fable N1/P1 fixture: a self-consistent manifest must not make extra executables acceptable.
         self.reject(files({'extra.ps1': b'x', 'helper.exe': b'MZ'}), 'Unexpected file')
 
+    def test_webview2_bootstrapper_never_ships_in_package(self):
+        # Setup bundles it from the separately pinned build input; the ZIP payload must not carry it.
+        for name in ('MicrosoftEdgeWebview2Setup.exe', 'prerequisites/MicrosoftEdgeWebview2Setup.exe'):
+            with self.subTest(name=name):
+                self.reject(files({name: b'MZ'}), 'Unexpected file')
+
 if __name__ == '__main__':
     unittest.main()

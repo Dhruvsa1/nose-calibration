@@ -22,6 +22,13 @@ tools or GitHub needed.
    Windows account only and adds a Start menu entry. If Setup says Nose
    Calibration is running, close the app first. Choose Finish; Setup does not
    open the app or start recording.
+   Most computers already have Microsoft Edge WebView2 Runtime, which the app
+   needs. If yours does not, Setup asks before installing it from Microsoft;
+   this needs an internet connection but no administrator access. Cancel is
+   unavailable while Microsoft's installer runs; after 10 minutes you can
+   keep waiting or stop. If that step fails or you decline, Setup stops
+   without installing Nose Calibration; follow its message (for example,
+   restart Windows) and run the setup file again.
 4. Open Nose Calibration from the Start menu.
 
 PRACTICE
@@ -59,8 +66,11 @@ key presses and screenshots are not automatically sent to an AI model.
 No setup can guarantee zero risk or anonymity.
 
 WINDOWS NOTES
-Microsoft Edge WebView2 Runtime is required and is commonly installed. If the
-app reports it missing, get it from Microsoft's official WebView2 page.
+Microsoft Edge WebView2 Runtime is required. The setup file includes
+Microsoft's signed WebView2 installer and runs it only when the runtime is
+missing; uninstalling Nose Calibration never removes the runtime. If the app
+still reports it missing, run the setup file again or contact the organizer.
+With the ZIP package, get it from Microsoft's official WebView2 page.
 The setup file and app are not code-signed. Windows may show a security
 warning. If you are unsure, stop and contact the organizer. Do not disable
 security software or change security settings to get past a warning.
@@ -98,5 +108,5 @@ NoseCalibration.exe there. This route adds no Start menu entry.
 
 See Nose-Calibration-Setup.pdf for the illustrated guide when included.
 Development preview packages may omit the PDF and are not approved releases.
-Live invitation upload, live GitHub upload and clean-machine installation
-remain unverified.
+Live invitation upload, live GitHub upload, clean-machine installation and
+Setup's automatic WebView2 installation remain unverified.

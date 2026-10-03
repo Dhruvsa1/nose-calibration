@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "fileName": "MicrosoftEdgeWebview2Setup.exe",
+  "officialLink": "https://go.microsoft.com/fwlink/p/?LinkId=2124703",
+  "allowedDownloadHosts": ["go.microsoft.com", "msedge.sf.dl.delivery.mp.microsoft.com"],
+  "sha256": "48a7b31419a8eb4fffdc7b6a02f6b4dfda60687fc897116be15370e10c2b66a7",
+  "bytes": 2002128,
+  "fileVersion": "1.3.273.21",
+  "signerSubject": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+  "signerThumbprint": "4028CAD637509D4744B17EC5B42AED8D7A31E6AF",
+  "issuerSubject": "CN=Microsoft Code Signing PCA 2024, O=Microsoft Corporation, C=US",
+  "allowedRootThumbprints": ["8F43288AD272F3103B6FB1428485EA3014C0BCFE"],
+  "retrievedUtc": "2026-10-03T01:19:42Z",
+  "observedFinalUrl": "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/e78b8ed2-851c-44ea-8502-ecdfd3c92217/MicrosoftEdgeWebview2Setup.exe",
+  "observedLastModified": "Thu, 01 Oct 2026 06:05:18 GMT",
+  "sources": [
+    "https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution",
+    "https://developer.microsoft.com/en-us/microsoft-edge/webview2/",
+    "https://github.com/MicrosoftEdge/WebView2Samples/blob/main/SampleApps/WV2DeploymentWiXCustomActionSample/Product.wxs"
+  ]
+}
