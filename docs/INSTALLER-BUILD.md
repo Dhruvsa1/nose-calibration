@@ -213,3 +213,16 @@ mutex. Uninstall was rejected while that real app was open. After closing the
 idle app, uninstall returned 0 and removed its executable; SHA-256 comparison
 confirmed all 100 existing recording files were unchanged. These are local
 silent-mode checks, not interactive-wizard or clean-machine validation.
+
+## Current prerequisite preview: runtime-present verification
+
+The preview built from the reviewed October 2 source has setup SHA-256
+570c62938d93721c1c419fe8be8a34ed890098db9c40a84fe51a3783c053e5f1.
+One silent per-user upgrade exited 0 in approximately 11 seconds. Setup detected
+WebView2 154.0.4258.48 and skipped its bootstrapper; no restart occurred.
+All 484 expected payload entries matched size and hash; both previous installed
+releases were preserved. Registration and the Start menu target release
+938e74155d1fdc2c7553b743. A native launch rendered the welcome page with consent
+unchecked and Start disabled, then closed without recording. This updates only
+the runtime-present upgrade evidence. The missing-runtime checklist above remains
+NOT RUN; clean-machine and live-upload verification are still outstanding.
