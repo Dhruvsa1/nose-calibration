@@ -9,12 +9,14 @@ internal class Harness
     {
         string root=Path.Combine(Path.GetTempPath(),"nose-sessions-test-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
         string id=new string('a',32),folder=Path.Combine(root,id),zip=Path.Combine(root,id+".zip");Directory.CreateDirectory(folder);
-        void Summary(long events=1,long shots=1,string mode="human")=>File.WriteAllText(Path.Combine(folder,"summary.json"),JsonSerializer.Serialize(new{eventCount=events,screenshotCount=shots,mode}));
+        void Summary(long events=1,long shots=1,string mode="human",string reason="completed")=>File.WriteAllText(Path.Combine(folder,"summary.json"),JsonSerializer.Serialize(new{eventCount=events,screenshotCount=shots,mode,reason}));
         try
         {
             File.WriteAllText(Path.Combine(folder,"manifest.json"),JsonSerializer.Serialize(new{sessionId=id,consent=true,schemaVersion=1,mode="human"}));Summary();
             File.WriteAllText(Path.Combine(folder,"answers.json"),"{\"values\":[\"synthetic\"]}");
             var current=CollectorSessionFiles.ReadCompleted(root,id);Check(current.Mode=="human" && current.EventCount==1 && current.Answers.HasValue,"completed session read");
+            CollectorSessionFiles.RequireHumanFinished(folder);
+            foreach(string reason in new[]{"stopped by participant","time limit"}) { Summary(reason:reason);try{CollectorSessionFiles.RequireHumanFinished(folder);throw new Exception("incomplete accepted");}catch(SitesSubmission.SharingError e){Check(e.Code=="completed_human_required","precise incomplete reason");}}Summary();
             var original=current;
             Summary(250001);Reject(()=>current=CollectorSessionFiles.ReadCompleted(root,id),"invalid counter");Check(current==original,"counter failure changed active selection");Summary();
             File.WriteAllText(Path.Combine(folder,"answers.json"),"{broken");Reject(()=>current=CollectorSessionFiles.ReadCompleted(root,id),"late malformed answer");Check(current==original,"late failure changed active selection");
@@ -27,6 +29,18 @@ internal class Harness
             Check(CollectorSessionFiles.FrozenBundle(folder,zip)==zip && File.ReadAllBytes(zip).SequenceEqual(bytes),"frozen archive reused unchanged");
             File.WriteAllText(Path.Combine(folder,"upload-state.json"),JsonSerializer.Serialize(new{Version=3,SessionId=id,ZipSha256=digest}));
             Check(CollectorSessionFiles.FrozenBundle(folder,zip)==zip && File.ReadAllBytes(zip).SequenceEqual(bytes),"selected-repository frozen archive reused unchanged");
+            var sites=new SitesSubmission.State(4,"sites",SitesEnvelope.StudyNamespace,SitesEnvelope.RecipientKeyId,new string('b',32),id,digest,new string('c',64),100,null,false,false);
+            File.WriteAllText(Path.Combine(folder,"upload-state.json"),JsonSerializer.Serialize(sites));
+            Check(CollectorSessionFiles.FrozenBundle(folder,zip)==zip,"valid Sites frozen export");
+            File.WriteAllText(Path.Combine(folder,"upload-state.json"),JsonSerializer.Serialize(sites with {Stored=true}));
+            Reject(()=>CollectorSessionFiles.FrozenBundle(folder,zip),"Sites stored without remote identity");
+            string validSites=JsonSerializer.Serialize(sites);
+            File.WriteAllText(Path.Combine(folder,"upload-state.json"),validSites[..^1]+",\"Version\":4}");
+            Reject(()=>CollectorSessionFiles.FrozenBundle(folder,zip),"Sites duplicate property");
+            File.WriteAllText(Path.Combine(folder,"upload-state.json"),validSites[..^1]+",\"Other\":true}");
+            Reject(()=>CollectorSessionFiles.FrozenBundle(folder,zip),"Sites unexpected property");
+            File.WriteAllText(Path.Combine(folder,"upload-state.json"),JsonSerializer.Serialize(sites with {StudyNamespace="wrong"}));
+            Reject(()=>CollectorSessionFiles.FrozenBundle(folder,zip),"Sites namespace mismatch");
             File.WriteAllText(Path.Combine(folder,"upload-state.json"),JsonSerializer.Serialize(new{Version=4,SessionId=id,ZipSha256=digest}));
             Reject(()=>CollectorSessionFiles.FrozenBundle(folder,zip),"unknown upload version");
             File.WriteAllText(Path.Combine(folder,"upload-state.json"),JsonSerializer.Serialize(new{Version=3,SessionId=id,ZipSha256=digest}));

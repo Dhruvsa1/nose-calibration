@@ -422,7 +422,8 @@ body:has(#welcome:not([hidden])) .app-main { height: 100%; }
 .admin-tab:focus-visible { outline: 2px solid var(--amber); outline-offset: -6px; border-radius: 8px; }
 /* A live dot on a tab whose work is running, so it stays noticeable from the other tab. */
 .admin:has(#admin-stop:not(:disabled)) #admin-tab-codex::after,
-.admin:has(#intake-stop:not(:disabled)) #admin-tab-intake::after {
+.admin:has(#intake-stop:not(:disabled)) #admin-tab-intake::after,
+.admin:has(#sites-intake-stop:not(:disabled)) #admin-tab-intake::after {
   content: ""; width: 6px; height: 6px; border-radius: 50%;
   background: var(--amber); box-shadow: 0 0 0 3px rgba(231, 182, 92, 0.16);
   animation: admin-live 1.6s ease-in-out infinite;
@@ -584,6 +585,154 @@ body:has(#welcome:not([hidden])) .app-main { height: 100%; }
   .admin-tabs { margin-left: -12px; }
   .intake-actions-fill { display: none; }
   .intake-btn { flex: 1 1 auto; }
+}
+
+/* Sites collection, the default in Submissions: own status classes so the GitHub worker's amber
+   state never colours it. The tally shows the worker's literal numbers for its last check; each new
+   check re-ticks them left to right. Old numbers dim and are labelled when a check sent none. */
+.sites-intake-status {
+  display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0;
+  color: #c8cdcf; font-size: 12.5px; line-height: 1.45;
+}
+.sites-intake-status::before {
+  content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: #5d6266; transform: translateY(-1px);
+}
+.sites-intake-status[data-state="pending"],
+.sites-intake-status[data-state="running"] { color: var(--amber); }
+.sites-intake-status[data-state="pending"]::before,
+.sites-intake-status[data-state="running"]::before { background: var(--amber); animation: admin-live 1.6s ease-in-out infinite; }
+.sites-intake-status[data-state="warn"] { color: #f3dcae; }
+.sites-intake-status[data-state="warn"]::before { background: var(--amber); }
+.sites-intake-status[data-state="error"] { color: #f3b9b6; }
+.sites-intake-status[data-state="error"]::before { background: var(--red); }
+
+.sites-cap { display: grid; gap: 5px; margin-top: 12px; }
+.sites-cap-label {
+  color: #9aa0a3; font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+}
+.sites-cap-input {
+  width: 100%; height: 34px; padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28); color: #eef0ee;
+  font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.12em;
+  transition: border-color 120ms ease;
+}
+.sites-cap-input:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.22); }
+.sites-cap-input:focus-visible { outline: 2px solid var(--amber); outline-offset: -1px; border-color: transparent; }
+.sites-cap-input[aria-invalid="true"] { border-color: #a8494c; }
+.sites-cap-input:disabled { background: rgba(255, 255, 255, 0.025); color: #7b7b78; cursor: not-allowed; }
+.sites-cap-note { margin: 0; color: #9aa0a3; font-size: 12px; }
+.sites-cap-note[data-state="ok"] { color: var(--green-ink); }
+.sites-cap-note[data-state="bad"] { color: #f3b9b6; }
+
+.sites-tally {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px;
+  background: rgba(0, 0, 0, 0.26);
+}
+.sites-tally-cell { min-width: 0; padding: 7px 10px 8px; }
+.sites-tally-cell + .sites-tally-cell { border-left: 1px solid rgba(255, 255, 255, 0.07); }
+.sites-tally dt {
+  color: #9aa0a3;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; line-height: 1.3; text-transform: uppercase;
+}
+.sites-tally dd {
+  margin: 2px 0 0;
+  color: #eef0ee; font-family: var(--font-mono); font-size: 17px; font-variant-numeric: tabular-nums; line-height: 1.25;
+}
+.sites-tally[data-state="empty"] dd { color: #5d6266; }
+.sites-tally[data-stale="true"] dd { color: #81858a; }
+.sites-stale { color: #f3dcae; font-weight: 500; letter-spacing: 0.02em; text-transform: none; }
+.sites-tally[data-state="warn"] [data-count="errors"] { background: var(--red-wash); }
+.sites-tally[data-state="warn"] [data-count="errors"] dd { color: #ff8a8e; }
+/* Two alternating names so the same animation replays on every check. */
+.sites-tally[data-tick="1"] dd { animation: sites-tick-a 420ms ease-out both; }
+.sites-tally[data-tick="2"] dd { animation: sites-tick-b 420ms ease-out both; }
+.sites-tally-cell:nth-child(2) dd { animation-delay: 45ms; }
+.sites-tally-cell:nth-child(3) dd { animation-delay: 90ms; }
+.sites-tally-cell:nth-child(4) dd { animation-delay: 135ms; }
+.sites-tally-cell:nth-child(5) dd { animation-delay: 180ms; }
+@keyframes sites-tick-a { from { opacity: 0; transform: translateY(-5px); } }
+@keyframes sites-tick-b { from { opacity: 0; transform: translateY(-5px); } }
+
+.sites-log {
+  position: relative;
+  max-height: 150px; overflow: auto;
+  margin: 0; padding: 2px 0 2px 2px; list-style: none;
+  scrollbar-color: #5c6166 transparent;
+}
+.sites-log:empty { display: none; }
+.sites-log:not(:empty) + .sites-log-empty { display: none; }
+.sites-log-item {
+  position: relative;
+  display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px;
+  padding: 3px 0 3px 16px;
+  font-size: 12px; line-height: 1.45;
+}
+/* A rail through the dots; each dot carries the outcome colour. */
+.sites-log-item::before {
+  content: ""; position: absolute; left: 3px; top: 0; bottom: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+.sites-log-item:first-child::before { top: 50%; }
+.sites-log-item:last-child::before { bottom: 50%; }
+.sites-log-item:only-child::before { display: none; }
+.sites-log-item::after {
+  content: ""; position: absolute; left: 0; top: calc(50% - 3.5px);
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #5d6266; box-shadow: 0 0 0 2px var(--bg-raise);
+}
+.sites-log-item:first-child { animation: admin-panel-in 220ms ease-out; }
+.sites-log-item[data-state="ok"]::after { background: var(--green); }
+.sites-log-item[data-state="start"]::after { background: var(--amber); }
+.sites-log-item[data-state="warn"]::after { background: transparent; border: 1.5px solid var(--amber); }
+.sites-log-item[data-state="error"]::after { background: var(--red); }
+.sites-log-time { color: #81858a; font-family: var(--font-mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.sites-log-text { min-width: 0; color: #c8cdcf; overflow-wrap: anywhere; }
+.sites-log-item:first-child .sites-log-text { color: #eef0ee; }
+.sites-log-item[data-state="error"] .sites-log-text { color: #f3b9b6; }
+
+.sites-intake .preview-tag { align-self: center; }
+
+/* Earlier GitHub collection: optional, collapsed under Sites. A live dot shows when its worker runs. */
+.intake-legacy { margin-top: 16px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; }
+.intake-legacy-head {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 2px 12px;
+  min-height: 40px; padding: 0 14px;
+  list-style: none; cursor: pointer; user-select: none;
+}
+.intake-legacy-head::-webkit-details-marker { display: none; }
+.intake-legacy-head:hover { background: rgba(255, 255, 255, 0.03); }
+.intake-legacy-head:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; border-radius: 8px; }
+.intake-legacy[open] > .intake-legacy-head { border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+.intake-legacy-name { display: inline-flex; align-items: center; gap: 8px; color: #e6e8e6; font-size: 13px; font-weight: 600; }
+.intake-legacy-meta { color: #9aa0a3; font-size: 12px; }
+.intake-legacy-head .chev { color: #9aa0a3; }
+.intake-legacy-body { padding: 12px 14px 14px; }
+.intake-legacy-body .intake-foot { margin-top: 12px; }
+.admin:has(#intake-stop:not(:disabled)) .intake-legacy-name::after {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--amber); box-shadow: 0 0 0 3px rgba(231, 182, 92, 0.16);
+  animation: admin-live 1.6s ease-in-out infinite;
+}
+@media (max-width: 600px) {
+  .intake-legacy-head { grid-template-columns: minmax(0, 1fr) auto; padding-top: 8px; padding-bottom: 8px; }
+  .intake-legacy-meta { grid-row: 2; grid-column: 1 / -1; }
+}
+
+/* The tally follows its own column, which is narrow beside the terms on wide windows too. */
+.sites-intake .intake-work { container: sites-work / inline-size; }
+.sites-tally-cell { display: flex; flex-direction: column; justify-content: space-between; }
+@container sites-work (max-width: 460px) {
+  .sites-tally { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sites-tally-cell:nth-child(4) { border-left: 0; }
+  .sites-tally-cell:nth-child(n + 4) { border-top: 1px solid rgba(255, 255, 255, 0.07); }
+  .sites-tally-cell:nth-child(5) { grid-column: span 2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sites-tally dd, .sites-log-item:first-child { animation: none !important; }
 }
 #start-session:disabled { background: #3a3f44; color: #8b9196; }
 
@@ -1288,6 +1437,116 @@ details.setup[open] > .setup-head, .setup-head-static { border-bottom: 1px solid
   background: var(--bg-strip);
 }
 
+/* Invitation sharing: the default route. Two ruled steps (connect, then consent and share); the
+   connection signal is the only green until something is actually stored. Amber marks the
+   development-preview caveat and anything still pending. */
+.sites-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin: 0 0 8px; }
+.sites-title { margin: 0; font-family: var(--font-display); font-size: 16px; font-weight: 600; color: var(--text); }
+.preview-tag {
+  padding: 1px 8px 2px;
+  border-left: 2px solid var(--amber); border-radius: 0 3px 3px 0;
+  background: rgba(231, 182, 92, 0.08);
+  color: var(--amber);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.sites-steps {
+  margin: 0 0 18px;
+  border: 1px solid var(--line); border-radius: 8px;
+  overflow: hidden;
+}
+.sites-steps .step { padding-top: 14px; padding-bottom: 15px; }
+.sites-steps .step-num { border-color: var(--green-line); color: var(--green-ink); }
+
+.sites-connect { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin-top: 12px; }
+.sites-field { display: grid; gap: 5px; flex: 1 1 18rem; max-width: 27rem; min-width: 0; }
+.sites-label {
+  color: var(--muted);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.sites-code {
+  width: 100%; height: 36px; padding: 0 12px;
+  border: 1px solid #4a4a47; border-radius: var(--radius);
+  background: var(--bg);
+  font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.08em;
+  transition: border-color 120ms ease;
+}
+.sites-code:hover:not(:disabled) { border-color: #6a6a66; }
+.sites-code:focus-visible { outline: 0; border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+.sites-code[aria-invalid="true"] { border-color: #a8494c; }
+.sites-code[aria-invalid="true"]:focus-visible { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
+.sites-code:disabled { border-color: var(--line); background: var(--bg-strip); cursor: not-allowed; }
+.sites-btn { min-width: 104px; }
+.step-text > .sites-code-note { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.sites-code-note[data-state="ok"] { color: var(--green-ink); }
+.sites-code-note[data-state="bad"] { color: #f3b9b6; }
+
+/* Connection signal. Text comes from app.js; the state attribute only colours it. */
+.signal {
+  display: flex; align-items: center; gap: 9px;
+  width: fit-content; max-width: 100%;
+  margin-top: 12px; padding: 6px 12px 6px 10px;
+  border: 1px solid var(--line); border-radius: 4px;
+  background: var(--bg-raise);
+}
+.signal-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; border: 1.5px solid var(--faint); }
+.signal-text { margin: 0; min-width: 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.signal[data-state="pending"] .signal-dot { border-color: var(--amber); background: var(--amber); animation: admin-live 1.2s ease-in-out infinite; }
+.signal[data-state="pending"] .signal-text { color: var(--text-2); }
+.signal[data-state="on"] { border-color: var(--green-line); background: var(--green-wash); }
+.signal[data-state="on"] .signal-dot { border-color: var(--green); background: var(--green); box-shadow: 0 0 0 3px rgba(27, 211, 93, 0.18); }
+.signal[data-state="on"] .signal-text { color: var(--text); font-weight: 600; }
+
+.sites-hint { margin: 0; color: var(--muted); font-size: 12.5px; }
+
+/* Upload status: a two-stage track (stored, then received by the organizer) beside the host's
+   words. Hidden until Encrypt and share is pressed for this recording. */
+.upload { margin-top: 14px; animation: admin-panel-in 180ms ease-out; }
+.upload[data-state="none"] { display: none; }
+.upload-track { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; margin: 0 0 8px; padding: 0; list-style: none; }
+.upload-stage {
+  display: flex; align-items: center; gap: 7px;
+  color: var(--faint);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.upload-stage::before { content: ""; width: 9px; height: 9px; flex: none; border-radius: 50%; border: 1.5px solid var(--line-strong); }
+.upload-received { position: relative; margin-left: 46px; }
+.upload-received::after {
+  content: ""; position: absolute; right: calc(100% + 8px); top: 50%;
+  width: 30px; border-top: 1.5px dashed var(--line-strong);
+}
+.upload[data-state="sending"] .upload-stored { color: var(--amber); }
+.upload[data-state="sending"] .upload-stored::before { border-color: var(--amber); animation: admin-live 1.2s ease-in-out infinite; }
+.upload[data-state="stored"] .upload-stored,
+.upload[data-state="received"] .upload-stage { color: var(--green-ink); }
+.upload[data-state="stored"] .upload-stored::before,
+.upload[data-state="received"] .upload-stage::before { border-color: var(--green); background: var(--green); }
+.upload[data-state="received"] .upload-received::after { border-top-style: solid; border-color: var(--green-line); }
+.upload[data-state="failed"] .upload-track { display: none; }
+.upload-status { margin: 0; max-width: 72ch; color: var(--text-2); font-size: 13px; }
+.upload[data-state="failed"] .upload-status {
+  width: fit-content; padding: 5px 10px 6px;
+  border-left: 2px solid var(--red); border-radius: 0 4px 4px 0;
+  background: var(--red-wash); color: #f3b9b6;
+}
+
+/* Earlier GitHub sharing: collapsed by default and set quieter than the invitation route. Its
+   contents are the unchanged GitHub setup and sharing controls. */
+.legacy { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.legacy-head {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 14px;
+  min-height: 44px; padding: 0 16px 0 14px;
+  background: var(--bg-strip);
+  list-style: none; cursor: pointer; user-select: none;
+}
+.legacy-head::-webkit-details-marker { display: none; }
+.legacy-head:hover { background: var(--bg-hover); }
+.legacy-head:focus-visible { outline-offset: -2px; }
+.legacy[open] > .legacy-head { border-bottom: 1px solid var(--line); }
+.legacy-name { color: var(--text-2); font-size: 13px; font-weight: 600; }
+.legacy-meta { color: var(--muted); font-size: 12px; }
+.legacy-head .chev { color: var(--muted); }
+.legacy-body { padding: 16px 16px 4px; }
+
 /* ---------- Toast ---------- */
 
 .toast {
@@ -1356,6 +1615,12 @@ body { display: flex; flex-direction: column; }
   .figure-row { grid-template-columns: 1fr; }
   .figure-cell + .figure-cell { border-left: 0; border-top: 1px solid var(--line); }
   .account { flex-basis: 100%; margin-left: 0; padding-left: 0; border-left: 0; }
+  .legacy-head { grid-template-columns: minmax(0, 1fr) auto; padding-top: 9px; padding-bottom: 9px; }
+  .legacy-meta { grid-row: 2; grid-column: 1 / -1; }
+  /* The two upload stages may wrap; drop the connector so it never dangles at a line start. */
+  .upload-track { gap: 4px 18px; }
+  .upload-received { margin-left: 0; }
+  .upload-received::after { content: none; }
   .task-table th:nth-child(1) { width: 52%; }
   .task-table th:nth-child(4) { width: 84px; }
   .task-row td { height: 51px; padding-top: 10px; padding-bottom: 10px; }

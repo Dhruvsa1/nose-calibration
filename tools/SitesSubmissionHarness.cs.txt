@@ -1,0 +1,97 @@
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using NoseCalibration;
+
+sealed class Fake : HttpMessageHandler
+{
+ internal string Participant=new('a',32),UploadId=new('c',32),Status="reserved";
+ internal string? Digest;internal long Bytes;internal string? Session;
+ internal bool Timeout,LosePut,WrongReceipt,Expire,Redirect,Oversize,BadBootstrap;internal int Puts;internal int PutStatus,GetStatus;
+ internal readonly List<string> Calls=new();internal readonly List<byte[]> Bodies=new();internal string Folder="";
+ static HttpResponseMessage Json(object o)=>new(HttpStatusCode.OK){Content=new StringContent(JsonSerializer.Serialize(o),Encoding.UTF8,"application/json")};
+ protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage r,CancellationToken ct)
+ {
+  ct.ThrowIfCancellationRequested();if(Timeout)throw new TaskCanceledException();Calls.Add(r.Method+" "+r.RequestUri!.AbsolutePath);
+  Harness.Check(r.RequestUri.GetLeftPart(UriPartial.Authority)==SitesSubmission.Origin,"origin");
+  Harness.Check(r.Headers.Authorization?.Parameter==Harness.Token,"bearer");
+  if(Oversize)return new(HttpStatusCode.OK){Content=new StringContent(new string('x',16385))};
+  if(Redirect)return new(HttpStatusCode.Redirect){Content=new StringContent("PRIVATE_SERVER_BODY")};
+  if(r.RequestUri.AbsolutePath=="/api/participant")return Json(new{protocolVersion=2,studyNamespace=SitesEnvelope.StudyNamespace,recipientKeyId=BadBootstrap?new string('0',64):SitesEnvelope.RecipientKeyId,participantId=Participant});
+  if(r.Method==HttpMethod.Post){
+   using var d=JsonDocument.Parse(await r.Content!.ReadAsStringAsync(ct));var x=d.RootElement;
+   Digest=x.GetProperty("digest").GetString();Bytes=x.GetProperty("bytes").GetInt64();Session=x.GetProperty("sessionId").GetString();
+   using var state=JsonDocument.Parse(File.ReadAllText(Path.Combine(Folder,"upload-state.json")));
+   Harness.Check(state.RootElement.GetProperty("Version").GetInt32()==4 && state.RootElement.GetProperty("RemoteWriteStarted").GetBoolean(),"durable transport marker before reservation");
+   Harness.Check(File.Exists(Path.Combine(Folder,"submission.nose2")),"durable envelope before reservation");
+  }
+  if(Expire)return new(HttpStatusCode.Gone){Content=new StringContent("PRIVATE_SERVER_BODY")};
+  if(r.Method==HttpMethod.Get && r.RequestUri.AbsolutePath.StartsWith("/api/uploads/") && GetStatus!=0)return new((HttpStatusCode)GetStatus){Content=new StringContent("PRIVATE_SERVER_BODY")};
+  if(r.Method==HttpMethod.Put && PutStatus!=0)return new((HttpStatusCode)PutStatus){Content=new StringContent("PRIVATE_SERVER_BODY")};
+  if(r.Method==HttpMethod.Put){
+   var body=await r.Content!.ReadAsByteArrayAsync(ct);Bodies.Add(body);Puts++;Status="stored";
+   Harness.Check(Convert.ToHexString(SHA256.HashData(body)).ToLowerInvariant()==Digest,"body digest");
+   Harness.Check(body.Length==Bytes && r.Content.Headers.ContentLength==Bytes,"body length");
+   if(LosePut){LosePut=false;throw new OperationCanceledException(ct);}
+  }
+  return Json(new{uploadId=UploadId,participantId=Participant,sessionId=Session,digest=WrongReceipt?new string('0',64):Digest,bytes=Bytes,status=Status,validated=false});
+ }
+}
+static class Harness
+{
+ internal static string Token=new('T',43);
+ internal static void Check(bool value,string why){if(!value)throw new Exception(why);}
+ static async Task Reject(Func<Task> run){try{await run();}catch(Exception e) when(e is SitesSubmission.SharingError or OperationCanceledException or InvalidDataException){Check(!e.Message.Contains(Token)&&!e.Message.Contains("PRIVATE_SERVER_BODY"),"leaked error");return;}throw new Exception("accepted invalid operation");}
+ static string Pem="";static int count;
+ static async Task Scenario(Func<string,string,Fake,HttpClient,Task> test){
+  string root=Path.Combine(Path.GetTempPath(),"nose-sites-synthetic-"+Guid.NewGuid().ToString("N"));string session=Path.Combine(root,new string('b',32));Directory.CreateDirectory(session);
+  string zip=Path.Combine(root,"synthetic.zip");File.WriteAllText(zip,"SYNTHETIC_PLAINTEXT_NOT_RECORDING");
+  var f=new Fake{Folder=session};using var h=new HttpClient(f);
+  try{await test(session,zip,f,h);count++;}finally{Directory.Delete(root,true);}
+ }
+ static Task<SitesSubmission.Receipt> Run(string s,string z,HttpClient h)=>SitesSubmission.UploadCore(z,s,Token,h,Pem);
+ static async Task Main(string[] args){Pem=File.ReadAllText(args[0]);
+  await Scenario(async(s,z,f,h)=>{var r=await Run(s,z,h);Check(r.Status=="stored"&&f.Puts==1,"initial upload");Check(f.Calls.IndexOf("GET /api/uploads/"+f.UploadId)<f.Calls.IndexOf("PUT /api/uploads/"+f.UploadId),"GET before PUT");var bytes=File.ReadAllBytes(Path.Combine(s,"submission.nose2"));await Run(s,z,h);Check(f.Puts==1,"no repeat PUT");Check(bytes.SequenceEqual(File.ReadAllBytes(Path.Combine(s,"submission.nose2"))),"frozen bytes");Check(!File.ReadAllText(Path.Combine(s,"upload-state.json")).Contains(Token),"token persistence");});
+  await Scenario(async(s,z,f,h)=>{f.LosePut=true;await Reject(()=>Run(s,z,h));await Run(s,z,h);Check(f.Puts==1,"lost PUT recovered by GET");});
+  await Scenario(async(s,z,f,h)=>{f.WrongReceipt=true;await Reject(()=>Run(s,z,h));Check(f.Puts==0,"mismatched receipt beforePUT");var bytes=File.ReadAllBytes(Path.Combine(s,"submission.nose2"));f.WrongReceipt=false;await Run(s,z,h);Check(bytes.SequenceEqual(f.Bodies[0]),"reservation retry same bytes");});
+  await Scenario(async(s,z,f,h)=>{f.Expire=true;await Reject(()=>Run(s,z,h));var bytes=File.ReadAllBytes(Path.Combine(s,"submission.nose2"));await Reject(()=>Run(s,z,h));Check(f.Puts==0&&bytes.SequenceEqual(File.ReadAllBytes(Path.Combine(s,"submission.nose2"))),"410 preserved noPUT");});
+  await Scenario(async(s,z,f,h)=>{await Run(s,z,h);int calls=f.Calls.Count;File.AppendAllText(z,"changed");await Reject(()=>Run(s,z,h));Check(f.Calls.Count==calls,"changed ZIP rejected offline");});
+  await Scenario(async(s,z,f,h)=>{await Run(s,z,h);f.Participant=new string('d',32);await Reject(()=>Run(s,z,h));Check(f.Puts==1,"participant binding");});
+  await Scenario(async(s,z,f,h)=>{await Run(s,z,h);f.UploadId=new string('d',32);await Reject(()=>Run(s,z,h));Check(f.Puts==1,"upload ID binding");});
+  await Scenario(async(s,z,f,h)=>{File.WriteAllText(Path.Combine(s,"upload-state.json"),"{\"Version\":3}");await Reject(()=>Run(s,z,h));Check(f.Calls.Count==0,"GitHub marker blocksSites offline");});
+  await Scenario(async(s,z,f,h)=>{await Run(s,z,h);int calls=f.Calls.Count;await Reject(()=>GitHubSubmission.UploadCore(z,s,h,new GitHubAppAccess.VerifiedRepository(1,2,3,"synthetic","nose-calibration-submissions"),_=>throw new Exception("must not revalidate"),()=>Token,Pem));Check(f.Calls.Count==calls,"Sites marker blocksGitHub offline");});
+  await Scenario(async(s,z,f,h)=>{using var locked=new FileStream(Path.Combine(s,"upload.lock"),FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);await Reject(()=>Run(s,z,h));Check(f.Calls.Count==0,"sharedlock blocksconcurrency");});
+  await Scenario(async(s,z,f,h)=>{f.Redirect=true;await Reject(()=>Run(s,z,h));Check(f.Calls.Count==1,"redirect refused");});
+  await Scenario(async(s,z,f,h)=>{f.WrongReceipt=true;await Reject(()=>Run(s,z,h));File.Move(Path.Combine(s,"submission.nose2"),Path.Combine(s,"submission.nose2.tmp"));f.WrongReceipt=false;await Run(s,z,h);Check(f.Puts==1,"matching staged recovery");});
+  await Scenario(async(s,z,f,h)=>{File.WriteAllText(Path.Combine(s,"submission.nose2"),"orphan");await Reject(()=>Run(s,z,h));Check(f.Calls.Count==0,"orphan preserved");});
+  await Scenario(async(s,z,f,h)=>{f.Oversize=true;await Reject(()=>Run(s,z,h));Check(f.Calls.Count==1&&!File.Exists(Path.Combine(s,"upload-state.json")),"oversize response no state");});
+  await Scenario(async(s,z,f,h)=>{f.BadBootstrap=true;await Reject(()=>Run(s,z,h));Check(f.Calls.Count==1&&!File.Exists(Path.Combine(s,"upload-state.json")),"bootstrap key pin failure");});
+  await Scenario(async(s,z,f,h)=>{await Run(s,z,h);File.AppendAllText(Path.Combine(s,"submission.nose2"),"changed");await Reject(()=>Run(s,z,h));Check(f.Puts==1,"modified ciphertext noPUT");});
+  await Scenario(async(s,z,f,h)=>{using var cancel=new CancellationTokenSource();cancel.Cancel();await Reject(()=>SitesSubmission.UploadCore(z,s,Token,h,Pem,cancel.Token));Check(f.Calls.Count==0,"cancel before side effects");});
+  await Scenario(async(s,z,f,h)=>{f.PutStatus=409;try{await Run(s,z,h);throw new Exception("accepted409");}catch(SitesSubmission.SharingError e){Check(e.Code=="storage_unconfirmed","PUT409 retry classification");}var frozen=File.ReadAllBytes(Path.Combine(s,"submission.nose2"));f.PutStatus=0;await Run(s,z,h);Check(frozen.SequenceEqual(f.Bodies[0]),"busy retry samebytes");});
+  await Scenario(async(s,z,f,h)=>{f.GetStatus=404;try{await Run(s,z,h);throw new Exception("accepted404");}catch(SitesSubmission.SharingError e){Check(e.Code=="upload_not_found","GET404 terminalclassification");}Check(f.Puts==0,"404 noPUT");});
+  await Scenario(async(s,z,f,h)=>{var file=Path.Combine(s,"submission.nose2.tmp");File.WriteAllText(file,"staged");try{await Run(s,z,h);throw new Exception("acceptedstale");}catch(SitesSubmission.SharingError e){Check(e.Code=="stale_staging"&&e.Message.Contains("recovery"),"staging recoveryguidance");}Check(File.ReadAllText(file)=="staged"&&f.Calls.Count==0,"staging preservedoffline");});
+  await Scenario(async(s,z,f,h)=>{string participant=await SitesSubmission.ConnectCore(Token,h,CancellationToken.None);Check(participant==f.Participant,"connect bootstrap");await Reject(()=>SitesSubmission.UploadCore(z,s,Token,h,Pem,default,new string('e',32)));Check(!File.Exists(Path.Combine(s,"upload-state.json"))&&f.Puts==0,"connected participant pinned before writes");});
+  var pending=new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+  using(var connection=new SitesConnection((_,_)=>pending.Task)) {
+   var first=connection.Connect("synthetic");await Reject(()=>connection.Connect("duplicate"));connection.Disconnect();pending.SetResult(new string('a',32));await Reject(()=>first);Check(connection.Participant==null&&!connection.Connecting,"canceled bootstrap cannot restore auth");
+  }
+  using(var connection=new SitesConnection((_,_)=>Task.FromResult(new string('a',32)))) {
+   await connection.Connect("synthetic");var auth=connection.Acquire();connection.Disconnect();Check(auth.Lifetime.IsCancellationRequested&&connection.Participant==null,"disconnect revokes acquired authorization");
+  }
+  using(var connection=new SitesConnection((_,_)=>Task.FromException<string>(new SitesSubmission.SharingError("connection_failed")))) {
+   await Reject(()=>connection.Connect("synthetic"));Check(!connection.Connecting&&connection.Participant==null,"failed bootstrap clears busy and auth");
+  }
+  var older=new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);int generations=0;
+  using(var connection=new SitesConnection((_,_)=>++generations==1?older.Task:Task.FromResult(new string('b',32)))) {
+   var stale=connection.Connect("old");connection.Disconnect();await connection.Connect("new");older.SetResult(new string('a',32));await Reject(()=>stale);Check(connection.Participant==new string('b',32),"stale completion cannot replace new connection");
+  }
+  await Scenario(async(s,z,f,h)=>{await Reject(()=>SitesSubmission.ConnectCore("bad",h,default));Check(f.Calls.Count==0,"invalid invitation noHTTP");f.BadBootstrap=true;await Reject(()=>SitesSubmission.ConnectCore(Token,h,default));});
+  await Scenario(async(s,z,f,h)=>{f.Timeout=true;try{await SitesSubmission.ConnectCore(Token,h,default);throw new Exception("accepted timeout");}catch(SitesSubmission.SharingError e){Check(e.Code=="connection_failed","connect timeout differs from cancel");}try{await Run(s,z,h);throw new Exception("accepted timeout");}catch(SitesSubmission.SharingError e){Check(e.Code=="service_unavailable","upload timeout differs from cancel");}});
+  await Scenario(async(s,z,f,h)=>{await Run(s,z,h);File.Delete(Path.Combine(s,"submission.nose2"));int calls=f.Calls.Count;try{await Run(s,z,h);throw new Exception("missing envelope accepted");}catch(SitesSubmission.SharingError e){Check(e.Code=="envelope_missing"&&f.Calls.Count==calls,"missing envelope precise/offline");}});
+  await Scenario(async(s,z,f,h)=>{using(var file=File.OpenWrite(z))file.SetLength(SitesEnvelope.MaxPlain+1);try{await Run(s,z,h);throw new Exception("oversize accepted");}catch(SitesSubmission.SharingError e){Check(e.Code=="recording_too_large"&&f.Calls.Count==0,"oversize precise/offline");}});
+  Console.WriteLine($"PASS: {count} synthetic Sites submission scenarios; no live network/auth/recordings.");
+ }
+}
+

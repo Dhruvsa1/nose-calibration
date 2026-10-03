@@ -51,12 +51,21 @@ internal static class CollectorSessionFiles
         if (File.Exists(answersPath)) { using var document = ReadObject(answersPath, 200000); answers = document.RootElement.Clone(); }
         return new Completed(folder, mode, events, shots, answers);
     }
+    internal static void RequireHumanFinished(string session)
+    {
+        var loaded=ReadCompleted(Path.GetDirectoryName(session)!,Path.GetFileName(session));
+        using var summary=ReadObject(Path.Combine(session,"summary.json"),200000);
+        if(loaded.Mode!="human" || summary.RootElement.GetProperty("reason").GetString()!="completed")
+            throw new SitesSubmission.SharingError("completed_human_required");
+    }
     internal static string FrozenBundle(string session, string zip)
     {
         using var state = ReadObject(Path.Combine(session, "upload-state.json"), 16384);
         var s = state.RootElement;
         string digest = s.GetProperty("ZipSha256").GetString() ?? "";
-        if (s.GetProperty("Version").GetInt32() is not (2 or 3) || s.GetProperty("SessionId").GetString() != Path.GetFileName(session) || !Regex.IsMatch(digest, "\\A[a-f0-9]{64}\\z"))
+        int version=s.GetProperty("Version").GetInt32();
+        if(version==4) digest=SitesSubmission.RequireState(Path.Combine(session,"upload-state.json"),Path.GetFileName(session)).ZipSha256;
+        if (version is not (2 or 3 or 4) || s.GetProperty("SessionId").GetString() != Path.GetFileName(session) || !Regex.IsMatch(digest, "\\A[a-f0-9]{64}\\z"))
             throw new InvalidDataException("Invalid saved upload state. The original upload ZIP was not changed.");
         if (!File.Exists(zip)) throw new InvalidOperationException("The original upload ZIP is missing. It cannot be recreated after sharing has begun; contact the organizer.");
         if (File.GetAttributes(zip).HasFlag(FileAttributes.ReparsePoint)) throw new InvalidDataException("Invalid upload ZIP");

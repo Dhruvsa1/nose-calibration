@@ -172,8 +172,9 @@
           </div>
           <p class="landing-copy">
             Recordings are saved on this computer and the app does not publish them. Sharing
-            with the study organizer is optional. It starts only if you sign in to GitHub,
-            confirm again on the results screen and press <strong>Encrypt and share</strong>.
+            with the study organizer is optional and needs no GitHub account. On the results
+            screen you can connect an invitation code from the organizer, consent separately and
+            press <strong>Encrypt and share</strong>. Nothing is uploaded before that.
           </p>
           <p class="landing-copy landing-note">
             Numeric metrics derived from your session, such as timings and counts, may be
@@ -258,44 +259,107 @@
 
           <div id="admin-panel-intake" class="admin-panel intake" role="tabpanel" aria-labelledby="admin-tab-intake">
             <h3 class="admin-panel-title">Participant submissions</h3>
-            <div class="intake-grid">
-              <ul id="intake-terms" class="admin-terms intake-terms">
-                <li><strong>Approve once.</strong> Approve a participant's GitHub account one time. After that, their later private submissions are collected while this Admin app is open.</li>
-                <li><strong>Unknown accounts wait.</strong> Submissions from accounts you have not approved stay pending until you approve them.</li>
-                <li><strong>Closing stops it.</strong> Collection runs only inside this app. Closing the app, or pressing <strong>Stop collection</strong>, stops the worker.</li>
-                <li><strong>No automatic profile changes.</strong> Collecting a submission never updates a typing profile on its own.</li>
-                <li><strong>Organizer sign-in.</strong> Uses the organizer's existing managed GitHub CLI sign-in on this computer. Participants keep their own, separate sign-in in their app.</li>
-              </ul>
 
-              <div class="intake-work">
-                <div class="intake-meta">
-                  <p id="intake-status" class="intake-status" role="status" aria-live="polite">Not checked</p>
-                  <p class="intake-count">
-                    <span class="intake-count-label">Approved accounts</span>
-                    <span id="intake-approved-count" class="intake-count-num">&ndash;</span>
-                  </p>
+            <!-- Sites collection, the default. app.js clears the read grant field before posting it
+                 and never stores, logs or echoes it. -->
+            <div id="sites-intake" class="sites-intake">
+              <div class="intake-grid">
+                <ul class="admin-terms intake-terms">
+                  <li><strong>Read grant.</strong> Paste the read grant copied from the owner-only Sites page. It lasts 24 hours and can only list, download and acknowledge encrypted uploads.</li>
+                  <li><strong>Not kept on this page.</strong> The field clears the moment you press Start. This page never saves or shows the grant again.</li>
+                  <li><strong>Closing stops it.</strong> Collection runs only while this Admin app is open. Closing the app, or pressing <strong>Stop Sites collection</strong>, ends it.</li>
+                  <li><strong>One thing at a time.</strong> Recording, Codex practice and the earlier GitHub collection wait while Sites collection runs. Collecting never updates a typing profile on its own.</li>
+                </ul>
+
+                <div class="intake-work">
+                  <div class="intake-meta">
+                    <p id="sites-intake-status" class="sites-intake-status" role="status" aria-live="polite" data-state="idle">Not running</p>
+                  </div>
+
+                  <div class="sites-cap">
+                    <label class="sites-cap-label" for="sites-intake-capability">Read grant</label>
+                    <input id="sites-intake-capability" class="sites-cap-input" type="password" autocomplete="off" spellcheck="false" maxlength="128" aria-describedby="sites-intake-cap-note">
+                    <p id="sites-intake-cap-note" class="sites-cap-note" data-state="idle">43 characters: letters, numbers, - and _.</p>
+                  </div>
+
+                  <h4 id="sites-intake-last-title" class="intake-queue-title">Last check <span id="sites-intake-stale" class="sites-stale" hidden>&middot; from an earlier check</span></h4>
+                  <dl id="sites-intake-tally" class="sites-tally" aria-labelledby="sites-intake-last-title" data-state="empty">
+                    <div class="sites-tally-cell" data-count="downloads"><dt>Downloads</dt><dd id="sites-count-downloads">&ndash;</dd></div>
+                    <div class="sites-tally-cell" data-count="retained"><dt>Retained</dt><dd id="sites-count-retained">&ndash;</dd></div>
+                    <div class="sites-tally-cell" data-count="calls"><dt>Calls</dt><dd id="sites-count-calls">&ndash;</dd></div>
+                    <div class="sites-tally-cell" data-count="errors"><dt>Errors</dt><dd id="sites-count-errors">&ndash;</dd></div>
+                    <div class="sites-tally-cell" data-count="skipped"><dt>Skipped</dt><dd id="sites-count-skipped">&ndash;</dd></div>
+                  </dl>
+
+                  <h4 id="sites-intake-log-title" class="intake-queue-title">Recent activity</h4>
+                  <ol id="sites-intake-log" class="sites-log" aria-labelledby="sites-intake-log-title"></ol>
+                  <p class="intake-empty sites-log-empty">Nothing yet. Starts, checks and stops appear here, newest first.</p>
+                </div>
+              </div>
+
+              <div class="intake-foot">
+                <div class="intake-actions">
+                  <span class="preview-tag">Development preview</span>
+                  <span class="intake-actions-fill"></span>
+                  <button id="sites-intake-stop" class="btn btn-outline admin-stop intake-btn" type="button" disabled>Stop Sites collection</button>
+                  <button id="sites-intake-start" class="btn admin-run intake-btn" type="button" aria-describedby="sites-intake-keys" disabled>Start Sites collection</button>
+                </div>
+                <p id="sites-intake-keys" class="intake-keys">
+                  <strong>Start Sites collection</strong> checks the study service about every five minutes.
+                  <strong>Last check</strong> shows the worker's own numbers for its most recent check only.
+                  The live service is a private preview and has not been verified end to end.
+                </p>
+              </div>
+            </div>
+
+            <!-- Earlier GitHub collection: optional and collapsed. IDs and behaviour are unchanged. -->
+            <details id="intake-github" class="intake-legacy">
+              <summary class="intake-legacy-head">
+                <span class="intake-legacy-name">Earlier GitHub collection</span>
+                <span class="intake-legacy-meta">Optional &middot; only for participants who shared through GitHub</span>
+                <span class="chev" aria-hidden="true"></span>
+              </summary>
+              <div class="intake-legacy-body">
+                <div class="intake-grid">
+                  <ul id="intake-terms" class="admin-terms intake-terms">
+                    <li><strong>Approve once.</strong> Approve a participant's GitHub account one time. After that, their later private submissions are collected while this Admin app is open.</li>
+                    <li><strong>Unknown accounts wait.</strong> Submissions from accounts you have not approved stay pending until you approve them.</li>
+                    <li><strong>Closing stops it.</strong> Collection runs only inside this app. Closing the app, or pressing <strong>Stop collection</strong>, stops the worker.</li>
+                    <li><strong>No automatic profile changes.</strong> Collecting a submission never updates a typing profile on its own.</li>
+                    <li><strong>Organizer sign-in.</strong> Uses the organizer's existing managed GitHub CLI sign-in on this computer. Participants keep their own, separate sign-in in their app.</li>
+                  </ul>
+
+                  <div class="intake-work">
+                    <div class="intake-meta">
+                      <p id="intake-status" class="intake-status" role="status" aria-live="polite">Not checked</p>
+                      <p class="intake-count">
+                        <span class="intake-count-label">Approved accounts</span>
+                        <span id="intake-approved-count" class="intake-count-num">&ndash;</span>
+                      </p>
+                    </div>
+
+                    <h4 id="intake-queue-title" class="intake-queue-title">Pending accounts</h4>
+                    <div id="intake-queue" class="intake-queue" aria-labelledby="intake-queue-title"></div>
+                    <p class="intake-empty">Nothing listed. After a check, accounts that sent a submission but are not approved yet appear here.</p>
+                  </div>
                 </div>
 
-                <h4 id="intake-queue-title" class="intake-queue-title">Pending accounts</h4>
-                <div id="intake-queue" class="intake-queue" aria-labelledby="intake-queue-title"></div>
-                <p class="intake-empty">Nothing listed. After a check, accounts that sent a submission but are not approved yet appear here.</p>
+                <div class="intake-foot">
+                  <div class="intake-actions">
+                    <button id="intake-refresh" class="btn btn-outline intake-btn" type="button" aria-describedby="intake-keys">Check invitations</button>
+                    <button id="intake-catchup" class="btn btn-outline intake-btn" type="button" aria-describedby="intake-keys">Collect now</button>
+                    <span class="intake-actions-fill"></span>
+                    <button id="intake-stop" class="btn btn-outline admin-stop intake-btn" type="button" disabled>Stop collection</button>
+                    <button id="intake-start" class="btn admin-run intake-btn" type="button" aria-describedby="intake-keys">Start automatic collection</button>
+                  </div>
+                  <p id="intake-keys" class="intake-keys">
+                    <strong>Check invitations</strong> refreshes the pending list. <strong>Collect now</strong>
+                    collects from approved accounts once. <strong>Automatic collection</strong> keeps doing that
+                    until you stop it or close the app.
+                  </p>
+                </div>
               </div>
-            </div>
-
-            <div class="intake-foot">
-              <div class="intake-actions">
-                <button id="intake-refresh" class="btn btn-outline intake-btn" type="button" aria-describedby="intake-keys">Check invitations</button>
-                <button id="intake-catchup" class="btn btn-outline intake-btn" type="button" aria-describedby="intake-keys">Collect now</button>
-                <span class="intake-actions-fill"></span>
-                <button id="intake-stop" class="btn btn-outline admin-stop intake-btn" type="button" disabled>Stop collection</button>
-                <button id="intake-start" class="btn admin-run intake-btn" type="button" aria-describedby="intake-keys">Start automatic collection</button>
-              </div>
-              <p id="intake-keys" class="intake-keys">
-                <strong>Check invitations</strong> refreshes the pending list. <strong>Collect now</strong>
-                collects from approved accounts once. <strong>Automatic collection</strong> keeps doing that
-                until you stop it or close the app.
-              </p>
-            </div>
+            </details>
           </div>
         </section>
       </div>
@@ -482,138 +546,236 @@
             <span class="optional-tag">Optional</span>
           </div>
           <div class="share-body">
-            <p class="share-copy">
-              Your session stays on this computer unless you finish the steps below. Signing in
-              uploads nothing. Only <strong>Encrypt and share</strong> uploads, and only to a private
-              repository you own. An interrupted upload may leave an encrypted file there; it is
-              never overwritten.
-            </p>
+            <!-- Invitation sharing through the study service. app.js posts sites-connect,
+                 sites-disconnect and sites-share; the host holds the connection in memory only and
+                 enforces every gate again. The code never comes back to this page. -->
+            <section id="sites-sharing" class="sites" aria-labelledby="sites-title">
+              <div class="sites-head">
+                <h3 id="sites-title" class="sites-title">Share with an invitation code</h3>
+                <span class="preview-tag">Development preview</span>
+              </div>
+              <p class="share-copy">
+                No GitHub account needed. Connect the invitation code the study organizer gave you,
+                then decide separately whether to share this recording. Connecting uploads nothing;
+                only <strong>Encrypt and share</strong> does. The study service is still in
+                development and this live upload has not been verified yet.
+              </p>
 
-            <!-- What the participant is agreeing to, before any setup step. -->
-            <dl class="share-facts" aria-label="What sharing involves">
-              <div class="share-fact">
-                <dt>Encrypted here</dt>
-                <dd>Encrypted on this computer with the organizer's public key before it leaves. It is intended to be readable only with the organizer's private key.</dd>
-              </div>
-              <div class="share-fact">
-                <dt>One repository</dt>
-                <dd>The app can reach only the repository you select: Contents read and write, Metadata read-only. Each recording is added as its own file; existing files are never replaced.</dd>
-              </div>
-              <div class="share-fact">
-                <dt>Short-lived sign-in</dt>
-                <dd>The token stays in this app's memory for at most 8 hours and is never saved. GitHub's refresh token is discarded.</dd>
-              </div>
-              <div class="share-fact share-fact-caution">
-                <dt>Organizer keeps write access</dt>
-                <dd>Personal repositories have no read-only collaborators, so the organizer can read, change or delete files in this one repository, for this and later recordings, until you remove them. They get nothing in your other repositories. This narrows access; it does not make sharing risk-free.</dd>
-              </div>
-            </dl>
+              <dl class="share-facts sites-facts" aria-label="What invitation sharing involves">
+                <div class="share-fact">
+                  <dt>Encrypted here</dt>
+                  <dd>Encrypted on this computer with the organizer's public key, then uploaded to the study service. The organizer decrypts it on their own computer.</dd>
+                </div>
+                <div class="share-fact">
+                  <dt>An invitation, not an account</dt>
+                  <dd>Uploads are linked to your invitation, not to a sign-in. A code works for at most 7 days and up to 3 recordings.</dd>
+                </div>
+                <div class="share-fact">
+                  <dt>Memory only</dt>
+                  <dd>The connection is held in this app's memory and never saved. Disconnect, or closing the app, forgets it.</dd>
+                </div>
+              </dl>
 
-            <!-- Steps 1-3: buttons ask the host to open fixed GitHub pages in the browser. The page
-                 builds no URLs and shows no completion state; GitHub is the source of truth. -->
-            <details class="setup" open>
-              <summary class="setup-head">
-                <h3 class="setup-name">Set up once per GitHub account</h3>
-                <span class="setup-meta">Already done? Go to step 4</span>
-                <span class="chev" aria-hidden="true"></span>
-              </summary>
-              <p class="setup-note">Each button opens github.com in your browser. This app creates, installs and invites nothing by itself.</p>
-              <ol class="steps">
-                <li class="step">
+              <ol class="steps sites-steps">
+                <li class="step step-wide">
                   <span class="step-num" aria-hidden="true">1</span>
                   <div class="step-text">
-                    <h4 class="step-title">Create a private repository</h4>
-                    <p>In your personal account, name it exactly <code class="pick">nose-calibration-submissions</code> and choose <strong>Private</strong>. One repository holds every recording you share.</p>
-                  </div>
-                  <button id="github-create-repo" class="btn btn-outline step-btn" type="button">Create repository</button>
-                </li>
-                <li class="step">
-                  <span class="step-num" aria-hidden="true">2</span>
-                  <div class="step-text">
-                    <h4 class="step-title">Install the Nose Calibration app on that repository only</h4>
-                    <p>Choose <strong>Only select repositories</strong>, then pick <code class="pick">nose-calibration-submissions</code>.</p>
-                    <p class="step-warn"><strong>Never choose All repositories</strong>, even if GitHub selects it first.</p>
-                  </div>
-                  <button id="github-install-app" class="btn btn-outline step-btn" type="button">Install app</button>
-                </li>
-                <li class="step">
-                  <span class="step-num" aria-hidden="true">3</span>
-                  <div class="step-text">
-                    <h4 class="step-title">Invite the organizer, once</h4>
-                    <p>Open <code class="pick">nose-calibration-submissions</code>, then <strong>Settings &rsaquo; Collaborators &rsaquo; Add people</strong> and add <code class="pick">Dhruvsa1</code>. The organizer must accept. Add no one else: other collaborators block sharing.</p>
-                  </div>
-                  <button id="github-invite-organizer" class="btn btn-outline step-btn" type="button">Open my repositories</button>
-                </li>
-              </ol>
-            </details>
-
-            <section class="setup setup-each" aria-labelledby="each-title">
-              <div class="setup-head setup-head-static">
-                <h3 id="each-title" class="setup-name">Each recording</h3>
-              </div>
-              <ol class="steps" start="4">
-                <li class="step step-wide">
-                  <span class="step-num" aria-hidden="true">4</span>
-                  <div class="step-text">
-                    <h4 class="step-title">Sign in to GitHub</h4>
-                    <p>
-                      This app has its own sign-in and does not use other GitHub logins on this
-                      computer. Enter the code it shows at <code>github.com/login/device</code>.
-                      <strong>Only enter a code this app displays</strong>, never one someone sends
-                      you. Then check the account name below.
-                    </p>
-                    <div class="button-row">
-                      <button id="sign-in" class="btn btn-outline" type="button">Sign in to GitHub</button>
-                      <div class="account">
-                        <span class="account-dot" aria-hidden="true"></span>
-                        <p id="github-account" class="account-status" role="status" aria-live="polite">Not signed in to GitHub</p>
-                        <button id="sign-out" class="btn btn-quiet account-out" type="button" aria-describedby="account-note" disabled>Sign out</button>
+                    <h4 class="step-title">Connect your invitation</h4>
+                    <p>Paste the code from your invitation. Use only a code the study organizer gave you. The field clears as soon as you press Connect.</p>
+                    <div class="sites-connect">
+                      <div class="sites-field">
+                        <label class="sites-label" for="sites-code">Invitation code</label>
+                        <input id="sites-code" class="sites-code" type="password" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="sites-code-note">
                       </div>
+                      <button id="sites-connect" class="btn btn-outline sites-btn" type="button" disabled>Connect</button>
+                      <button id="sites-disconnect" class="btn btn-quiet sites-btn" type="button" disabled>Disconnect</button>
+                    </div>
+                    <p id="sites-code-note" class="sites-code-note" data-state="idle">43 characters: letters, numbers, - and _.</p>
+                    <div id="sites-signal" class="signal" data-state="off">
+                      <span class="signal-dot" aria-hidden="true"></span>
+                      <p id="sites-account" class="signal-text" role="status" aria-live="polite">Not connected</p>
                     </div>
                   </div>
                 </li>
                 <li class="step step-wide">
-                  <span class="step-num" aria-hidden="true">5</span>
+                  <span class="step-num" aria-hidden="true">2</span>
                   <div class="step-text">
                     <h4 class="step-title">Consent, then encrypt and share</h4>
                     <p class="model-note">
-                      Numeric metrics derived from your session may be reviewed by OpenAI Codex. Raw code,
-                      key presses and screenshots are not automatically sent to any AI model.
+                      Connecting is not consent to share. Numeric metrics derived from your session may
+                      be reviewed by OpenAI Codex. Raw code, key presses and screenshots are not
+                      automatically sent to any AI model.
                     </p>
 
-                    <label class="check" for="share-consent">
-                      <input id="share-consent" type="checkbox">
+                    <label class="check" for="sites-share-consent">
+                      <input id="sites-share-consent" type="checkbox" disabled>
                       <span class="check-box" aria-hidden="true"></span>
                       <span class="check-text">
-                        I consent to encrypt this session on this computer, store it in my private
-                        <code>nose-calibration-submissions</code> repository, and let the study
-                        organizer keep write access to that one repository until I remove them.
+                        I consent to encrypt this recording on this computer and upload it to the study
+                        service, where the study organizer can download and decrypt it.
                       </span>
                     </label>
 
                     <div class="button-row">
-                      <button id="share-session" class="btn btn-primary" type="button" aria-describedby="receipt-note">Encrypt and share</button>
+                      <button id="sites-share" class="btn btn-primary" type="button" aria-describedby="sites-share-hint" disabled>Encrypt and share</button>
+                      <p id="sites-share-hint" class="sites-hint">Connect an invitation first.</p>
                     </div>
-                    <p id="receipt-note" class="receipt-note">
-                      A receipt appears below only after the upload is verified and the organizer's
-                      access is confirmed. If the organizer has not accepted yet, you see a pending
-                      notice instead; sharing again later only rechecks access and never uploads twice.
-                    </p>
+
+                    <!-- Two stages reported by the host. Neither means the data was checked. -->
+                    <div id="sites-upload" class="upload" data-state="none">
+                      <ol class="upload-track" aria-hidden="true">
+                        <li class="upload-stage upload-stored">Stored</li>
+                        <li class="upload-stage upload-received">Received by organizer</li>
+                      </ol>
+                      <p id="sites-upload-status" class="upload-status" role="status" aria-live="polite"></p>
+                    </div>
                   </div>
                 </li>
               </ol>
             </section>
 
-            <p id="account-note" class="account-note">
-              <strong>Stopping access.</strong> Sign out or closing the app discards the token here,
-              but does not revoke the grant on GitHub. To revoke it, open GitHub
-              <strong>Settings &rsaquo; Applications &rsaquo; Authorized GitHub Apps</strong> and
-              revoke Nose Calibration. To stop all sharing, also uninstall it under
-              <strong>Installed GitHub Apps</strong> and remove the organizer from the repository's
-              collaborators, or delete the repository.
-            </p>
+            <!-- Earlier GitHub route, kept intact for existing participants and records. -->
+            <details id="github-sharing" class="legacy">
+              <summary class="legacy-head">
+                <span class="legacy-name">Earlier GitHub sharing</span>
+                <span class="legacy-meta">Only if the organizer asked you to use GitHub</span>
+                <span class="chev" aria-hidden="true"></span>
+              </summary>
+              <div class="legacy-body">
+                <p class="share-copy">
+                  Your session stays on this computer unless you finish the steps below. Signing in
+                  uploads nothing. Only <strong>Encrypt and share</strong> uploads, and only to a private
+                  repository you own. An interrupted upload may leave an encrypted file there; it is
+                  never overwritten.
+                </p>
 
-            <div id="receipt" class="receipt" aria-live="polite"></div>
+                <!-- What the participant is agreeing to, before any setup step. -->
+                <dl class="share-facts" aria-label="What sharing involves">
+                  <div class="share-fact">
+                    <dt>Encrypted here</dt>
+                    <dd>Encrypted on this computer with the organizer's public key before it leaves. It is intended to be readable only with the organizer's private key.</dd>
+                  </div>
+                  <div class="share-fact">
+                    <dt>One repository</dt>
+                    <dd>The app can reach only the repository you select: Contents read and write, Metadata read-only. Each recording is added as its own file; existing files are never replaced.</dd>
+                  </div>
+                  <div class="share-fact">
+                    <dt>Short-lived sign-in</dt>
+                    <dd>The token stays in this app's memory for at most 8 hours and is never saved. GitHub's refresh token is discarded.</dd>
+                  </div>
+                  <div class="share-fact share-fact-caution">
+                    <dt>Organizer keeps write access</dt>
+                    <dd>Personal repositories have no read-only collaborators, so the organizer can read, change or delete files in this one repository, for this and later recordings, until you remove them. They get nothing in your other repositories. This narrows access; it does not make sharing risk-free.</dd>
+                  </div>
+                </dl>
+
+                <!-- Steps 1-3: buttons ask the host to open fixed GitHub pages in the browser. The page
+                     builds no URLs and shows no completion state; GitHub is the source of truth. -->
+                <details class="setup" open>
+                  <summary class="setup-head">
+                    <h3 class="setup-name">Set up once per GitHub account</h3>
+                    <span class="setup-meta">Already done? Go to step 4</span>
+                    <span class="chev" aria-hidden="true"></span>
+                  </summary>
+                  <p class="setup-note">Each button opens github.com in your browser. This app creates, installs and invites nothing by itself.</p>
+                  <ol class="steps">
+                    <li class="step">
+                      <span class="step-num" aria-hidden="true">1</span>
+                      <div class="step-text">
+                        <h4 class="step-title">Create a private repository</h4>
+                        <p>In your personal account, name it exactly <code class="pick">nose-calibration-submissions</code> and choose <strong>Private</strong>. One repository holds every recording you share.</p>
+                      </div>
+                      <button id="github-create-repo" class="btn btn-outline step-btn" type="button">Create repository</button>
+                    </li>
+                    <li class="step">
+                      <span class="step-num" aria-hidden="true">2</span>
+                      <div class="step-text">
+                        <h4 class="step-title">Install the Nose Calibration app on that repository only</h4>
+                        <p>Choose <strong>Only select repositories</strong>, then pick <code class="pick">nose-calibration-submissions</code>.</p>
+                        <p class="step-warn"><strong>Never choose All repositories</strong>, even if GitHub selects it first.</p>
+                      </div>
+                      <button id="github-install-app" class="btn btn-outline step-btn" type="button">Install app</button>
+                    </li>
+                    <li class="step">
+                      <span class="step-num" aria-hidden="true">3</span>
+                      <div class="step-text">
+                        <h4 class="step-title">Invite the organizer, once</h4>
+                        <p>Open <code class="pick">nose-calibration-submissions</code>, then <strong>Settings &rsaquo; Collaborators &rsaquo; Add people</strong> and add <code class="pick">Dhruvsa1</code>. The organizer must accept. Add no one else: other collaborators block sharing.</p>
+                      </div>
+                      <button id="github-invite-organizer" class="btn btn-outline step-btn" type="button">Open my repositories</button>
+                    </li>
+                  </ol>
+                </details>
+
+                <section class="setup setup-each" aria-labelledby="each-title">
+                  <div class="setup-head setup-head-static">
+                    <h3 id="each-title" class="setup-name">Each recording</h3>
+                  </div>
+                  <ol class="steps" start="4">
+                    <li class="step step-wide">
+                      <span class="step-num" aria-hidden="true">4</span>
+                      <div class="step-text">
+                        <h4 class="step-title">Sign in to GitHub</h4>
+                        <p>
+                          This app has its own sign-in and does not use other GitHub logins on this
+                          computer. Enter the code it shows at <code>github.com/login/device</code>.
+                          <strong>Only enter a code this app displays</strong>, never one someone sends
+                          you. Then check the account name below.
+                        </p>
+                        <div class="button-row">
+                          <button id="sign-in" class="btn btn-outline" type="button">Sign in to GitHub</button>
+                          <div class="account">
+                            <span class="account-dot" aria-hidden="true"></span>
+                            <p id="github-account" class="account-status" role="status" aria-live="polite">Not signed in to GitHub</p>
+                            <button id="sign-out" class="btn btn-quiet account-out" type="button" aria-describedby="account-note" disabled>Sign out</button>
+                          </div>
+                        </div>
+                      </div>
+                    </li>
+                    <li class="step step-wide">
+                      <span class="step-num" aria-hidden="true">5</span>
+                      <div class="step-text">
+                        <h4 class="step-title">Consent, then encrypt and share</h4>
+                        <p class="model-note">
+                          Numeric metrics derived from your session may be reviewed by OpenAI Codex. Raw code,
+                          key presses and screenshots are not automatically sent to any AI model.
+                        </p>
+
+                        <label class="check" for="share-consent">
+                          <input id="share-consent" type="checkbox">
+                          <span class="check-box" aria-hidden="true"></span>
+                          <span class="check-text">
+                            I consent to encrypt this session on this computer, store it in my private
+                            <code>nose-calibration-submissions</code> repository, and let the study
+                            organizer keep write access to that one repository until I remove them.
+                          </span>
+                        </label>
+
+                        <div class="button-row">
+                          <button id="share-session" class="btn btn-primary" type="button" aria-describedby="receipt-note">Encrypt and share</button>
+                        </div>
+                        <p id="receipt-note" class="receipt-note">
+                          A receipt appears below only after the upload is verified and the organizer's
+                          access is confirmed. If the organizer has not accepted yet, you see a pending
+                          notice instead; sharing again later only rechecks access and never uploads twice.
+                        </p>
+                      </div>
+                    </li>
+                  </ol>
+                </section>
+
+                <p id="account-note" class="account-note">
+                  <strong>Stopping access.</strong> Sign out or closing the app discards the token here,
+                  but does not revoke the grant on GitHub. To revoke it, open GitHub
+                  <strong>Settings &rsaquo; Applications &rsaquo; Authorized GitHub Apps</strong> and
+                  revoke Nose Calibration. To stop all sharing, also uninstall it under
+                  <strong>Installed GitHub Apps</strong> and remove the organizer from the repository's
+                  collaborators, or delete the repository.
+                </p>
+
+                <div id="receipt" class="receipt" aria-live="polite"></div>
+              </div>
+            </details>
           </div>
           <div class="share-foot">
             <button id="export-session" class="btn btn-quiet" type="button">Export session file</button>

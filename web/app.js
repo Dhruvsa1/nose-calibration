@@ -2,19 +2,23 @@
 (() => {
  const $=id=>document.getElementById(id), native=window.chrome?.webview;
  let grading=false, finishing=false, revision=0, sessionId='', signedIn=false, adminEdition=false;
- let adminBusy=false,intakeBusy=false,intakeRunning=false,intakePending=null;
+ let adminBusy=false,adminStarting=false,intakeBusy=false,intakeRunning=false,intakePending=null;
+ let sitesConnected=false,sitesBusy='',sitesFailed=false,sitesEpoch=0,sitesShareEpoch=-1;
  let running=false, mode='human', current=0, seq=0, started=0, batch=[], answers=questions.map(q=>q.starter||''), grades={}, count=0;
  const post=(command,extra={})=>native?.postMessage({command,...extra});
  const toast=message=>{$('toast').textContent=message;};
  function updateIntakeControls(){
-  const blocked=!adminEdition||adminBusy||running||intakeBusy;
+  const blocked=!adminEdition||adminBusy||running||intakeBusy||sitesIntakeActive();
   for(const id of ['intake-refresh','intake-catchup'])$(id).disabled=blocked;
   $('intake-start').disabled=blocked||intakeRunning;
   $('intake-stop').disabled=!adminEdition||!intakeRunning;
   for(const button of $('intake-queue').querySelectorAll('button'))button.disabled=blocked;
+  // Its Stop must stay reachable while the earlier GitHub worker runs.
+  if(intakeRunning)$('intake-github').open=true;
+  updateSitesIntake();
  }
  function requestIntake(command,extra={}){
-  if(!adminEdition||((running||adminBusy||intakeBusy)&&command!=='stop'))return;
+  if(!adminEdition||((running||adminBusy||intakeBusy||sitesIntakeActive())&&command!=='stop'))return;
   intakePending=command;intakeBusy=true;updateIntakeControls();$('intake-status').textContent=command==='stop'?'Stopping collection…':'Working…';
   post('intake-'+command,extra);
  }
@@ -49,6 +53,111 @@
   if(acknowledged&&['approve','revoke'].includes(data.command))requestIntake('queue');
   else if(acknowledged&&['queue','catchup'].includes(data.command)&&!intakeRunning)requestIntake('status');
  }
+ // Sites collection (Admin; the default in Submissions). Posts sites-intake-start {capability} and
+ // sites-intake-stop; the host relays worker lines and its own results as {kind:'sites-intake-result',data}.
+ // The read grant leaves the field before it is posted and is never kept, logged or shown here.
+ const sitesCapabilityFormat=/^[A-Za-z0-9_-]{43}$/;
+ const sitesCountLimits={downloads:3,retained:10000,calls:100,errors:10000,skipped:10000};
+ const sitesIntakeMessages={recipient_key_setup_invalid:'The local recipient key on this computer could not be verified. The organizer must repair the key setup on this computer. Participants do not need to resend anything.',worker_already_running:'Sites collection is already running.',sites_not_authorized:'The Sites service did not accept this read grant. It may have expired or been revoked. Copy a new one from the owner-only Sites page, then start again.',sites_http_failed:'The Sites service returned an error.',sites_transport_failed:'Could not reach the Sites service.',sites_transport_busy:'The Sites connection was busy.',sites_corpus_quota:'Local Sites storage is full.',sites_pin_quota:'Local Sites storage is full.',sites_record_quota:'Local Sites storage is full.',sites_backoff_capacity:'Too many uploads are waiting for a later retry. Review the private collection state.',sites_list_invalid:'The Sites service sent an upload list this app could not read. Nothing from it was stored.',sites_validation_unavailable:'Upload validation is unavailable on this computer. Nothing was accepted.',sites_local_unavailable:'The local Sites collection folder is unavailable.',sites_intake_failed:'The Sites collection worker failed. Check the private runtime.',sites_partial_failure:'Some recordings could not be verified; they were not accepted.',sites_intake_busy:'Sites collection cannot start while a recording, Codex run, sharing or another collection is active.',sites_stop_failed:'Sites collection could not be stopped. Close this Admin window to stop its worker.',sites_worker_not_owned:'A collection worker started from another Admin window or terminal is running. Stop it in that original window.'};
+ // Pending start and pending stop are separate: a run or cycle never clears a requested stop, and a
+ // malformed message never clears either one while the worker's state is unknown.
+ let sitesIntakeRunning=false,sitesStartPending=false,sitesStopPending=false,sitesIntakeUncertain=false,sitesIntakeStopped=false,sitesIntakeError='';
+ const sitesIntakeActive=()=>sitesIntakeRunning||sitesStartPending||sitesStopPending||sitesIntakeUncertain;
+ const sitesIntakeBlocked=()=>!adminEdition||running||finishing||grading||adminBusy||adminStarting||intakeBusy||intakeRunning||!!intakePending;
+ const sitesIntakeText=code=>(typeof code==='string'&&Object.hasOwn(sitesIntakeMessages,code)?sitesIntakeMessages[code]:'')||'Sites collection could not complete. Check the private runtime and try again.';
+ function sitesIntakeStatus(state,text){const s=$('sites-intake-status');s.dataset.state=state;s.textContent=text;}
+ function sitesIntakeShow(){
+  if(sitesStopPending)sitesIntakeStatus('pending','Stopping Sites collection…');
+  else if(sitesStartPending)sitesIntakeStatus('pending','Starting Sites collection…');
+  else if(sitesIntakeUncertain)sitesIntakeStatus('warn','Could not read the latest Sites collection status. Press Stop to make sure it has ended.');
+  else if(sitesIntakeRunning)sitesIntakeStatus(sitesIntakeError?'warn':'running',sitesIntakeError?sitesIntakeError+' Collection is still running.':'Running. Checks about every five minutes while this app is open.');
+  else if(sitesIntakeError)sitesIntakeStatus('error',sitesIntakeError);
+  else sitesIntakeStatus('idle',sitesIntakeStopped?'Sites collection stopped.':'Not running');
+ }
+ function updateSitesIntake(){
+  const input=$('sites-intake-capability'),value=input.value.trim(),valid=sitesCapabilityFormat.test(value),active=sitesIntakeActive(),blocked=sitesIntakeBlocked();
+  input.disabled=blocked||active;
+  $('sites-intake-start').disabled=input.disabled||!valid;
+  // Stop stays available while a start is unacknowledged, the worker runs or its state is unknown.
+  $('sites-intake-stop').disabled=!adminEdition||sitesStopPending||!(sitesIntakeRunning||sitesStartPending||sitesIntakeUncertain);
+  // No recording or Codex run may start while Sites collection is pending or active.
+  $('start-session').disabled=!$('consent').checked||active;
+  $('admin-run').disabled=adminBusy||adminStarting||active;
+  const note=$('sites-intake-cap-note');let state='idle';
+  if(active)note.textContent='Sites collection is active. Stop it to use a different read grant.';
+  else if(blocked&&adminEdition)note.textContent='Unavailable while a recording, Codex run or GitHub collection is active.';
+  else if(!value)note.textContent='43 characters: letters, numbers, - and _.';
+  else if(valid){state='ok';note.textContent='Format looks right.';}
+  else{state='bad';note.textContent=/[^A-Za-z0-9_-]/.test(value)?'Use only letters, numbers, - and _.':value.length+' of 43 characters.';}
+  note.dataset.state=state;input.setAttribute('aria-invalid',String(state==='bad'));
+ }
+ function sitesIntakeLog(state,text){
+  const log=$('sites-intake-log'),item=document.createElement('li'),time=document.createElement('time'),body=document.createElement('span');
+  const now=new Date();item.className='sites-log-item';item.dataset.state=state;time.className='sites-log-time';time.dateTime=now.toISOString();
+  time.textContent=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');body.className='sites-log-text';body.textContent=text;
+  item.append(time,body);log.prepend(item);while(log.children.length>6)log.lastElementChild.remove();
+ }
+ function sitesIntakeCounts(counts){
+  if(!counts||typeof counts!=='object'||Array.isArray(counts)||Object.keys(counts).length!==5)return null;
+  const checked={};
+  for(const [name,limit] of Object.entries(sitesCountLimits)){const n=Object.hasOwn(counts,name)?counts[name]:NaN;if(!Number.isSafeInteger(n)||n<0||n>limit)return null;checked[name]=n;}
+  return checked;
+ }
+ function sitesIntakeValid(d){
+  if(!d||typeof d!=='object'||Array.isArray(d)||d.schemaVersion!==1||d.transport!=='sites'||!['run','cycle','stop'].includes(d.command)||typeof d.ok!=='boolean'||typeof d.running!=='boolean')return false;
+  if(d.ok?d.error!==null:typeof d.error!=='string'||!/^[a-z_]{1,64}$/.test(d.error))return false;
+  return !Object.hasOwn(d,'counts')||d.command==='cycle'&&!!sitesIntakeCounts(d.counts);
+ }
+ // Literal numbers from the most recent check. Without new counts the old ones stay, marked stale.
+ function sitesIntakeTally(counts,ok){
+  const tally=$('sites-intake-tally');
+  if(counts){
+   for(const name of Object.keys(sitesCountLimits))$('sites-count-'+name).textContent=String(counts[name]);
+   tally.dataset.state=ok?'ok':'warn';tally.dataset.tick=String((Number(tally.dataset.tick)||0)%2+1);
+  }
+  const stale=!counts&&tally.dataset.state!=='empty';tally.dataset.stale=String(stale);$('sites-intake-stale').hidden=!stale;
+ }
+ function requestSitesIntake(command){
+  if(!adminEdition)return;
+  if(command==='stop'){
+   if(sitesStopPending||!(sitesIntakeRunning||sitesStartPending||sitesIntakeUncertain))return;
+   sitesStopPending=true;sitesIntakeShow();updateIntakeControls();post('sites-intake-stop');return;
+  }
+  const input=$('sites-intake-capability'),capability=input.value.trim();input.value='';
+  if(sitesIntakeBlocked()||sitesIntakeActive()||!sitesCapabilityFormat.test(capability)){updateIntakeControls();return;}
+  sitesStartPending=true;sitesIntakeError='';sitesIntakeStopped=false;sitesIntakeTally(null);sitesIntakeShow();updateIntakeControls();
+  post('sites-intake-start',{capability});
+ }
+ function sitesIntakeResult(data){
+  if(!sitesIntakeValid(data)){
+   // Fail closed: nothing is cleared or claimed. Start stays blocked and Stop stays available.
+   sitesIntakeUncertain=true;sitesIntakeShow();updateIntakeControls();return;
+  }
+  const {command,ok,running:workerRunning}=data,wasActive=sitesIntakeRunning||sitesStartPending||sitesStopPending,text=ok?'':sitesIntakeText(data.error);
+  if(command==='run'){
+   if(!sitesStartPending)return; // Stale: no start is waiting for this reply.
+   sitesStartPending=false;sitesIntakeUncertain=false;sitesIntakeRunning=workerRunning;
+   if(ok&&workerRunning){sitesIntakeError='';$('sites-intake-capability').value='';sitesIntakeLog('start','Collection started');}
+   else{sitesIntakeError=text||sitesIntakeText(null);sitesIntakeLog('error','Could not start');}
+  }else if(command==='cycle'){
+   if(!sitesIntakeRunning)return; // Checks count only while the worker is known to run.
+   sitesIntakeUncertain=false;sitesIntakeRunning=workerRunning;
+   sitesIntakeTally(Object.hasOwn(data,'counts')?sitesIntakeCounts(data.counts):null,ok);
+   // A generic failure after a specific one keeps the specific explanation.
+   if(ok)sitesIntakeError='';else if(!(data.error==='sites_intake_failed'&&sitesIntakeError))sitesIntakeError=text;
+   sitesIntakeLog(ok?'ok':workerRunning?'warn':'error',ok?'Check finished':workerRunning?'Check reported an error':'Collection ended with an error');
+  }else{
+   sitesStopPending=false;sitesIntakeUncertain=false;sitesIntakeRunning=workerRunning;
+   if(workerRunning){
+    // Only running:false means stopped, even when ok is true.
+    sitesIntakeError=ok?'Sites collection did not stop.':text;sitesIntakeLog('error','Stop did not complete');
+   }else{
+    sitesStartPending=false;if(!ok)sitesIntakeError=text;
+    if(wasActive){sitesIntakeStopped=true;sitesIntakeLog('stop','Collection stopped');}
+   }
+  }
+  sitesIntakeShow();updateIntakeControls();
+ }
  function page(id){for(const name of ['welcome','overview','workspace','results'])$(name).hidden=name!==id;}
  function event(type,extra={}) { if(!running||!document.hasFocus()||document.hidden)return; batch.push({id:++seq,type,t:Math.round((performance.now()-started)*100)/100,question:questions[current].id,viewport:{width:innerWidth,height:innerHeight,scale:devicePixelRatio},...extra});count++; if(batch.length>=100)flush();return seq; }
  function flush(){if(batch.length){post('events',{events:batch.splice(0,512)});}}
@@ -61,7 +170,7 @@
  document.addEventListener('selectionchange',()=>{const e=document.activeElement;if(e?.id==='code-editor')event('selection',{start:e.selectionStart,end:e.selectionEnd,region:'answer-area'});});
  window.addEventListener('blur',()=>{flush();});
  setInterval(flush,100);
- setInterval(()=>{if(running){const s=Math.max(0,1800-Math.floor((performance.now()-started)/1000));$('timer').textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;if(s===0)finish(false);}},1000);
+ setInterval(()=>{if(running){const s=Math.max(0,1800-Math.floor((performance.now()-started)/1000));$('timer').textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}},1000);
  function tasks(){const list=$('task-list');list.replaceChildren();questions.forEach((q,i)=>{const tr=document.createElement('tr');tr.className='task-row';for(const text of [`${i+1}. ${q.title}`,q.type,grades[i]?.passed?'Passed':answers[i]&&answers[i]!==q.starter?'In progress':'Not started']){const td=document.createElement('td');td.textContent=text;tr.append(td);}const td=document.createElement('td'),b=document.createElement('button');b.className='solve-button';b.textContent='Solve';b.onclick=()=>show(i);td.append(b);tr.append(td);list.append(tr);});}
  function save(){const e=$('code-editor')||$('text-answer')||$('choice-answer');if(e)answers[current]=e.value;else{const checked=document.querySelector('input[name=answer]:checked');if(checked)answers[current]=checked.value;}}
  function show(i){save();current=i;page('workspace');$('question-title').textContent=questions[i].type==='Coding'?'JavaScript · '+questions[i].title:questions[i].title;
@@ -93,30 +202,106 @@
   post('finish',{answers:snapshot()});results();
   try{if(gradeAll){for(let i=0;i<questions.length;i++){const result=await grade(i);if(revision!==finishRevision)return;grades[i]=result;}post('finalized',{sessionId:finishedSession,answers:snapshot()});results();}}
   finally{if(revision===finishRevision){finishing=false;updateSharing();}}}
- function updateSharing(){$('share-session').disabled=!signedIn||!$('share-consent').checked||finishing;$('export-session').disabled=finishing;$('sign-out').disabled=!signedIn;}
+ function updateSharing(){$('share-session').disabled=!signedIn||!$('share-consent').checked||finishing||!!sitesBusy;$('export-session').disabled=finishing;$('sign-out').disabled=!signedIn;updateSites();updateIntakeControls();}
  for(const [id,action] of [['github-create-repo','create'],['github-install-app','install'],['github-invite-organizer','invite']])$(id)?.addEventListener('click',()=>post('github-setup',{action}));
- function resetSharing(){$('share-consent').checked=false;$('receipt').textContent='';updateSharing();}
+ function resetSharing(){$('share-consent').checked=false;$('receipt').textContent='';resetSites();$('sites-intake-capability').value='';updateSharing();}
+ // Invitation sharing. The host keeps the connection in memory and re-checks every gate. The code
+ // is cleared from the field before it is posted and is never stored, logged or echoed here.
+ // sitesBusy is this page's own pending marker: the host sends no busy message, so it clears on an
+ // account update, an upload status, or a matching operation-tagged failure notice/error.
+ const sitesCodeFormat=/^[A-Za-z0-9_-]{43}$/;
+ const sitesEligible=()=>!running&&!finishing&&!grading&&!adminBusy&&mode==='human'&&/^[a-f0-9]{32}$/.test(sessionId);
+ function sitesUpload(state,text=''){$('sites-upload-status').textContent=text;$('sites-upload').dataset.state=state;}
+ function updateSites(){
+  const input=$('sites-code'),code=input.value.trim(),valid=sitesCodeFormat.test(code),consent=$('sites-share-consent'),eligible=sitesEligible();
+  input.disabled=sitesConnected||!!sitesBusy||running||finishing||grading||adminBusy;
+  $('sites-connect').disabled=!valid||input.disabled;
+  // Disconnect stays available while anything is pending so it can cancel and clear memory.
+  $('sites-disconnect').disabled=!sitesConnected&&!sitesBusy;
+  consent.disabled=!sitesConnected||!!sitesBusy||!eligible;
+  $('sites-share').disabled=consent.disabled||!consent.checked;
+  const note=$('sites-code-note');let noteState='idle';
+  if(sitesConnected)note.textContent='Connected. Disconnect to use a different code.';
+  else if(sitesFailed&&!code){noteState='bad';note.textContent='Could not connect. Check the code and paste it again.';}
+  else if(!code)note.textContent='43 characters: letters, numbers, - and _.';
+  else if(valid){noteState='ok';note.textContent='Code format looks right.';}
+  else{noteState='bad';note.textContent=/[^A-Za-z0-9_-]/.test(code)?'Use only letters, numbers, - and _.':code.length+' of 43 characters.';}
+  note.dataset.state=noteState;input.setAttribute('aria-invalid',String(noteState==='bad'&&!!code));
+  const signal=$('sites-account');
+  $('sites-signal').dataset.state=sitesBusy==='connect'||sitesBusy==='disconnect'?'pending':sitesConnected?'on':'off';
+  signal.textContent=sitesBusy==='connect'?'Connecting…':sitesBusy==='disconnect'?'Disconnecting…':sitesConnected?'Connected with your invitation':'Not connected';
+  $('sites-share-hint').textContent=sitesBusy==='share'?'Keep the app open. Disconnect cancels.':sitesBusy?'':
+   !sitesConnected?'Connect an invitation first.':
+   running?'Finish or stop the recording first.':finishing||grading?'Wait until grading finishes.':adminBusy?'Wait until the Codex run stops.':
+   !/^[a-f0-9]{32}$/.test(sessionId)?'Open a finished recording to share it.':mode!=='human'?'Only your own practice recordings can be shared, not Codex or test runs.':
+   !consent.checked?'Tick the consent box to enable sharing.':'Shares only this recording.';
+ }
+ // New, started or loaded session: no consent or status may carry over to a different recording.
+ function resetSites(){sitesEpoch++;$('sites-share-consent').checked=false;$('sites-code').value='';sitesFailed=false;sitesUpload('none');}
+ $('sites-code').addEventListener('input',()=>{sitesFailed=false;updateSites();});
+ $('sites-code').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();$('sites-connect').click();}});
+ $('sites-connect').onclick=()=>{
+  const input=$('sites-code'),code=input.value.trim();input.value='';
+  if(!sitesCodeFormat.test(code)||sitesConnected||sitesBusy||running||finishing||grading||adminBusy){updateSites();return;}
+  sitesBusy='connect';sitesFailed=false;updateSharing();post('sites-connect',{code});
+ };
+ $('sites-disconnect').onclick=()=>{
+  if(!sitesConnected&&!sitesBusy)return;
+  if(sitesBusy==='share'&&sitesShareEpoch===sitesEpoch)sitesUpload('failed','Sharing was cancelled. The upload may not have completed.');
+  $('sites-code').value='';sitesBusy='disconnect';updateSharing();post('sites-disconnect');
+ };
+ $('sites-share-consent').onchange=updateSites;
+ $('sites-share').onclick=()=>{
+  if(!sitesConnected||sitesBusy||!sitesEligible()||!$('sites-share-consent').checked)return;
+  sitesBusy='share';sitesShareEpoch=sitesEpoch;sitesUpload('sending','Encrypting and uploading this recording…');updateSharing();post('sites-share',{consent:true});
+ };
+ function sitesMessage(m){
+  const shareShown=sitesBusy==='share'&&sitesShareEpoch===sitesEpoch;
+  if(m.kind==='sites-account'){
+   const connected=m.connected===true&&typeof m.participantId==='string'&&/^[a-f0-9]{32}$/.test(m.participantId);
+   if(sitesBusy==='connect'&&!connected)sitesFailed=true;
+   if(shareShown&&!connected)sitesUpload('failed','Sharing was cancelled. The upload may not have completed.');
+   // A connection change never carries consent over, including a fresh connection.
+   sitesConnected=connected;sitesBusy='';$('sites-share-consent').checked=false;updateSharing();
+  }else if(m.kind==='sites-upload'&&(m.status==='stored'||m.status==='received_by_organizer')){
+   const fromThisRecording=sitesShareEpoch===sitesEpoch;
+   if(sitesBusy==='share')sitesBusy='';
+   if(fromThisRecording)sitesUpload(m.status==='stored'?'stored':'received',m.status==='stored'
+    ?'Stored: the study service holds the encrypted upload. The organizer has not downloaded it yet.'
+    :'Received: the organizer has downloaded the encrypted upload. This confirms delivery only, not that the recording was checked.');
+   updateSharing();
+  }else if((m.kind==='notice'||m.kind==='error')&&sitesBusy&&m.operation==='sites-'+sitesBusy){
+   if(sitesBusy==='connect')sitesFailed=true;
+   if(shareShown)sitesUpload('failed','Sharing was not confirmed. The upload may be stored; see the message below.');
+   sitesBusy='';updateSharing();
+  }
+ }
  $('new-session').addEventListener('click',resetSharing);
  function results(){running=false;page('results');$('recording-status').textContent='Recording stopped';$('recording-status').dataset.state='stopped';$('score-summary').textContent=`${Object.values(grades).filter(g=>g?.passed===true).length} / ${questions.length} questions passed`;$('metrics-summary').textContent=`${count.toLocaleString()} interaction events collected. Review the local files before sharing.`;updateSharing();}
- $('consent').onchange=()=>{$('start-session').disabled=!$('consent').checked;};
- $('start-session').onclick=()=>{if($('consent').checked)post('start',{consent:true});};
+ $('consent').onchange=()=>{$('start-session').disabled=!$('consent').checked||sitesIntakeActive();};
+ $('start-session').onclick=()=>{if($('consent').checked&&!sitesIntakeActive())post('start',{consent:true});};
  $('resume-last').disabled=true;$('resume-last').title='Sessions are immutable; start a new recording.';
- $('open-data').onclick=()=>post('open');$('open-first').onclick=()=>show(0);$('back-overview').onclick=()=>{save();tasks();page('overview');};$('previous').onclick=()=>show(Math.max(0,current-1));$('next').onclick=()=>show(Math.min(questions.length-1,current+1));$('run-code').onclick=check;$('finish-session').onclick=()=>finish();$('stop-recording').onclick=()=>finish(false);
- $('sign-in').onclick=()=>{$('sign-in').disabled=true;post('signin');};$('sign-out').onclick=()=>post('signout');$('share-session').disabled=true;$('share-consent').onchange=updateSharing;$('share-session').onclick=()=>{if(signedIn&&!finishing&&$('share-consent').checked)post('share',{consent:true});};$('export-session').onclick=()=>{if(!finishing)post('export');};$('new-session').onclick=()=>{revision++;finishing=false;answers=questions.map(q=>q.starter||'');grades={};current=0;page('welcome');$('consent').checked=false;$('start-session').disabled=true;post('list-sessions');};
+ $('open-data').onclick=()=>post('open');$('open-first').onclick=()=>show(0);$('back-overview').onclick=()=>{save();tasks();page('overview');};$('previous').onclick=()=>show(Math.max(0,current-1));$('next').onclick=()=>show(Math.min(questions.length-1,current+1));$('run-code').onclick=check;$('finish-session').onclick=()=>finish();$('stop-recording').onclick=()=>{if(!running)return;save();flush();revision++;finishing=true;updateSharing();post('stop');};
+ $('sign-in').onclick=()=>{$('sign-in').disabled=true;post('signin');};$('sign-out').onclick=()=>post('signout');$('share-session').disabled=true;$('share-consent').onchange=updateSharing;$('share-session').onclick=()=>{if(signedIn&&!finishing&&!sitesBusy&&$('share-consent').checked)post('share',{consent:true});};$('export-session').onclick=()=>{if(!finishing)post('export');};$('new-session').onclick=()=>{revision++;finishing=false;answers=questions.map(q=>q.starter||'');grades={};current=0;page('welcome');$('consent').checked=false;$('start-session').disabled=true;post('list-sessions');};
  $('refresh-sessions').onclick=()=>post('list-sessions');$('saved-session').onchange=()=>{$('load-session').disabled=!$('saved-session').value;};$('load-session').onclick=()=>{const id=$('saved-session').value;if(/^[a-f0-9]{32}$/.test(id))post('load-session',{sessionId:id});};
- $('admin-run').onclick=()=>{if(adminEdition&&!running&&!finishing){$('admin-run').disabled=true;post('admin-start',{model:$('admin-model').value,effort:$('admin-effort').value,prompt:$('admin-prompt').value});}};
+ $('admin-run').onclick=()=>{if(adminEdition&&!running&&!finishing&&!adminStarting&&!sitesIntakeActive()){adminStarting=true;$('admin-run').disabled=true;updateIntakeControls();post('admin-start',{model:$('admin-model').value,effort:$('admin-effort').value,prompt:$('admin-prompt').value});}};
+ $('sites-intake-capability').addEventListener('input',updateSitesIntake);$('sites-intake-capability').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();requestSitesIntake('start');}});
+ $('sites-intake-start').onclick=()=>requestSitesIntake('start');$('sites-intake-stop').onclick=()=>requestSitesIntake('stop');
  $('intake-refresh').onclick=()=>requestIntake('queue');$('intake-catchup').onclick=()=>requestIntake('catchup');$('intake-start').onclick=()=>requestIntake('start');$('intake-stop').onclick=()=>requestIntake('stop');
  $('admin-stop').onclick=$('admin-stop-active').onclick=()=>{if(adminEdition)post('admin-stop');};
  native?.addEventListener('message',e=>{const m=e.data;
+  sitesMessage(m);
   if(m.kind==='started')resetSharing();
+  if(m.kind==='receipt')$('github-sharing').open=true;
   if(m.kind==='edition'){adminEdition=m.mode==='admin';$('admin-controls').hidden=!adminEdition;updateIntakeControls();}
-  if(m.kind==='admin-status'&&adminEdition){adminBusy=m.running===true;$('admin-status').textContent=m.message||'';$('admin-run').disabled=adminBusy;$('admin-stop').disabled=!adminBusy;$('admin-stop-active').hidden=!adminBusy;updateIntakeControls();}
+  if(m.kind==='admin-status'&&adminEdition){adminBusy=m.running===true;adminStarting=m.starting===true;$('admin-status').textContent=m.message||'';$('admin-run').disabled=adminBusy;$('admin-stop').disabled=!(adminBusy||adminStarting);$('admin-stop-active').hidden=!(adminBusy||adminStarting);updateIntakeControls();updateSharing();}
   if(m.kind==='intake-result'&&adminEdition)intakeResult(m.data,m.stream===true);
+  if(m.kind==='sites-intake-result'&&adminEdition)sitesIntakeResult(m.data);
   if(m.kind==='account'){signedIn=typeof m.login==='string'&&!!m.login;$('github-account').textContent=signedIn?'Signed in to GitHub as '+m.login:'Not signed in to GitHub';$('sign-in').disabled=false;updateSharing();}
-  if(m.kind==='error')$('sign-in').disabled=false;
+  if(m.kind==='error'){$('sign-in').disabled=false;if(adminStarting){adminStarting=false;updateIntakeControls();}}
   if(m.kind==='sessions'){const select=$('saved-session');select.replaceChildren();const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Choose an earlier recording';select.append(placeholder);for(const s of m.sessions||[]){if(!/^[a-f0-9]{32}$/.test(s.id))continue;const option=document.createElement('option');option.value=s.id;option.textContent=(s.startedAt||s.id)+' · '+s.mode;select.append(option);}$('load-session').disabled=true;}
-  if(m.kind==='loaded'){revision++;finishing=false;sessionId=m.sessionId;mode=m.mode;count=Number(m.events)||0;grades=m.answers?.grades&&typeof m.answers.grades==='object'?m.answers.grades:{};$('receipt').textContent='';$('share-consent').checked=false;results();}
+  if(m.kind==='loaded'){revision++;finishing=false;sessionId=m.sessionId;mode=m.mode;count=Number(m.events)||0;grades=m.answers?.grades&&typeof m.answers.grades==='object'?m.answers.grades:{};$('receipt').textContent='';$('share-consent').checked=false;resetSites();results();}
  });
- native?.addEventListener('message',e=>{const m=e.data;if(m.kind==='started'){sessionId=m.sessionId||'';revision++;finishing=false;running=true;mode=m.mode;started=performance.now();seq=count=0;batch=[];$('recording-status').textContent='Recording this test only';$('recording-status').dataset.state='recording';tasks();page('overview');}else if(m.kind==='stopped')hostStopped();else if(m.kind==='notice'||m.kind==='error')toast(m.message);else if(m.kind==='receipt'){$('receipt').textContent='Submitted successfully: '+m.url;}else if(m.kind==='admin-start'){answers=questions.map(q=>q.starter||'');grades={};post('admin-record-ready',{startId:m.startId});}});
+ native?.addEventListener('message',e=>{const m=e.data;if(m.kind==='started'){sessionId=m.sessionId||'';revision++;finishing=false;running=true;mode=m.mode;started=performance.now();seq=count=0;batch=[];$('recording-status').textContent='Recording this test only';$('recording-status').dataset.state='recording';tasks();page('overview');updateSharing();}else if(m.kind==='stopped')hostStopped();else if(m.kind==='notice'||m.kind==='error')toast(m.message);else if(m.kind==='receipt'){$('receipt').textContent='Submitted successfully: '+m.url;}else if(m.kind==='admin-start'){answers=questions.map(q=>q.starter||'');grades={};post('admin-record-ready',{startId:m.startId});}});
  post('ready');
 })();

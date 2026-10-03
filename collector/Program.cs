@@ -29,6 +29,7 @@ internal partial class CollectorForm : Form
     DateTime started, lastShot;
     long eventCount, shotCount, eventBytes, screenshotBytes;
     bool shotBusy, sharing;
+    readonly SitesConnection sitesConnection = new();
     GitHubDeviceAuth? githubAuth;
     CancellationTokenSource? uploadCancellation;
     readonly bool verificationMode;
@@ -75,8 +76,8 @@ internal partial class CollectorForm : Form
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         ConfigureAdmin();
         Shown += async (_, _) => { try { await Initialize(); } catch (Exception ex) { MessageBox.Show("Could not start the web interface. Microsoft Edge WebView2 Runtime is required.\n" + ex.Message); } };
-        FormClosing += (_, _) => { uploadCancellation?.Cancel(); githubAuth?.Disconnect(); StopSession("window closed"); };
-        FormClosed += (_, _) => { clock.Dispose(); githubAuth?.Dispose(); };
+        FormClosing += (_, _) => { uploadCancellation?.Cancel(); sitesConnection.Disconnect(); githubAuth?.Disconnect(); StopSession("window closed"); };
+        FormClosed += (_, _) => { clock.Dispose(); sitesConnection.Dispose(); githubAuth?.Dispose(); };
         clock.Tick += (_, _) => { if (recording && (DateTime.UtcNow - started).TotalMinutes >= 30) { StopSession("time limit"); Send(new { kind = "stopped", reason = "30-minute limit reached" }); } };
     }
     async Task Initialize()
@@ -116,7 +117,7 @@ internal partial class CollectorForm : Form
                 string command = payload.GetProperty("command").GetString()!;
                 switch (command)
                 {
-                    case "ready": Send(new { kind = "edition", mode = Text.Contains("Admin") ? "admin" : "collector" }); SendAccount(); ListSessions(); break;
+                    case "ready": Send(new { kind = "edition", mode = Text.Contains("Admin") ? "admin" : "collector" }); SendAccount(); SendSitesAccount(); ListSessions(); break;
                     case "start": bool allowed = true; AllowHumanStart(ref allowed); if (allowed && payload.GetProperty("consent").GetBoolean()) StartSession(); break;
                     case "events":
                         if (!recording || GetForegroundWindow() != Handle || !ContainsFocus) break;
@@ -153,8 +154,20 @@ internal partial class CollectorForm : Form
                     case "stop": StopSession("stopped by participant"); Send(new { kind = "stopped", folder = session, events = eventCount, screenshots = shotCount }); break;
                     case "open": Process.Start(new ProcessStartInfo(DataRoot) { UseShellExecute = true }); break;
                     case "export": Export(); break;
+                    case "sites-connect":
+                        try {
+                            if(recording || sharing || shotBusy) throw new SitesSubmission.SharingError("operation_busy");
+                            await sitesConnection.Connect(payload.GetProperty("code").GetString() ?? "");
+                        } catch(Exception ex) { SitesNotice("sites-connect",ex); }
+                        finally { SendSitesAccount(); }
+                        break;
+                    case "sites-disconnect": sitesConnection.Disconnect(); SendSitesAccount(); break;
+                    case "sites-share":
+                        if(payload.TryGetProperty("consent",out var sitesConsent) && sitesConsent.ValueKind==JsonValueKind.True) await ShareSites();
+                        else SitesNotice("sites-share",new SitesSubmission.SharingError("consent_required"));
+                        break;
                     case "signin":
-                        if (sharing) throw new InvalidOperationException("Wait for the current upload to finish or sign out to cancel it before changing accounts.");
+                        if (sharing || sitesConnection.Connecting) throw new InvalidOperationException("Wait for the current upload to finish or sign out to cancel it before changing accounts.");
                         githubAuth ??= new GitHubDeviceAuth(Path.Combine(AppContext.BaseDirectory, "oauth-client.json"));
                         try { await githubAuth.SignIn(message => Send(new { kind = "notice", message })); }
                         finally { SendAccount(); }
@@ -188,7 +201,7 @@ internal partial class CollectorForm : Form
     {
         if (recording) return;
         if (shotBusy) throw new InvalidOperationException("Wait for the pending screenshot to finish before starting another recording.");
-        if (sharing) throw new InvalidOperationException("Wait for the current upload to finish before starting another recording.");
+        if (sharing || sitesConnection.Connecting) throw new InvalidOperationException("Wait for the current upload to finish before starting another recording.");
         if (!Text.Contains("Admin")) mode = verificationMode ? "verification" : "human";
         string id = Guid.NewGuid().ToString("N"); session = Path.Combine(DataRoot, "sessions", id); Directory.CreateDirectory(session);
         started = DateTime.UtcNow; eventCount = shotCount = eventBytes = screenshotBytes = 0; lastShot = DateTime.MinValue;
@@ -250,7 +263,7 @@ internal partial class CollectorForm : Form
     }
     async Task Share()
     {
-        if (sharing) return; sharing = true;
+        if (sharing || sitesConnection.Connecting) return; sharing = true;
         using var cancellation = new CancellationTokenSource(); uploadCancellation = cancellation;
         try
         {
@@ -269,6 +282,32 @@ internal partial class CollectorForm : Form
         catch (GitHubSubmission.OrganizerAccessPending pending) { Send(new { kind = "notice", message = pending.Message }); }
         catch (OperationCanceledException) { Send(new { kind = "notice", message = "Sharing stopped. Your local files remain. Share again to verify or resume; an existing remote submission is never overwritten." }); }
         finally { uploadCancellation = null; sharing = false; }
+    }
+    void SendSitesAccount() => Send(new {kind="sites-account",connected=sitesConnection.Participant!=null,participantId=sitesConnection.Participant});
+    void SitesNotice(string operation,Exception error)
+    {
+        string message=error is SitesSubmission.SharingError known ? known.Message : error is OperationCanceledException
+            ? (operation=="sites-connect" ? "Invitation connection was canceled." : "Invitation sharing was canceled. Local files remain; reconnect and retry to verify the remote status.")
+            : "Invitation sharing could not complete. Local files remain. Check the connection and completed session, then retry.";
+        Send(new {kind="notice",operation,message});
+    }
+    async Task ShareSites()
+    {
+        if(sharing || recording || shotBusy || sitesConnection.Connecting) { SitesNotice("sites-share",new SitesSubmission.SharingError("operation_busy"));return; }
+        sharing=true;
+        try
+        {
+            if(session==null || mode!="human") throw new SitesSubmission.SharingError("completed_human_required");
+            CollectorSessionFiles.RequireHumanFinished(session);
+            var auth=sitesConnection.Acquire();
+            using var cancellation=CancellationTokenSource.CreateLinkedTokenSource(auth.Lifetime);
+            string zip=Bundle();
+            var receipt=await SitesSubmission.Upload(zip,session,auth.Invitation,auth.ParticipantId,cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            Send(new {kind="sites-upload",status=receipt.Status});
+        }
+        catch(Exception ex) { SitesNotice("sites-share",ex); }
+        finally { sharing=false; }
     }
     void SendAccount() => Send(new { kind = "account", login = githubAuth?.CurrentAccount?.Login, accountId = githubAuth?.CurrentAccount?.Id });
     static bool SessionName(string? name) => name != null && System.Text.RegularExpressions.Regex.IsMatch(name, "^[a-f0-9]{32}$");

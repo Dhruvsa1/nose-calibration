@@ -1,74 +1,102 @@
-NOSE CALIBRATION — WINDOWS x64
+NOSE CALIBRATION — WINDOWS x64 — DEVELOPMENT PREVIEW
 
-Before extracting, check the download. In PowerShell run:
-   Get-FileHash -Algorithm SHA256 <path to the downloaded ZIP>
-Compare the Hash with the SHA-256 the organizer published for this package,
-through a channel separate from the download (for example the study
-announcement). If they differ, or no published value exists, do not open the
-package; contact the organizer. A .sha256 file downloaded next to the ZIP, and
-package-files.json inside it, only detect damage: anyone who changed the package
-could change them too. package-source.json names the version and source revision.
+There is no public download and no approved release yet. Use only a preview
+setup file the study organizer gave you directly. Invitation sharing is not yet
+enabled or verified; these steps describe how it will work once the organizer
+enables it. If anything fails or is unavailable, stop and contact the organizer.
 
-1. Extract the entire ZIP into a new, empty folder you own.
-2. Open NoseCalibration.exe. Keep all files together.
-3. Read the recording notice, check consent, and choose Start session.
-4. Work through the practice questions normally. Answer accuracy is optional for human calibration.
-5. Choose Submit Test when finished, or Stop recording at any time.
-6. Optional sharing setup, once: create a private personal repository named
-   nose-calibration-submissions. Install the Nose Calibration GitHub App using
-   Only select repositories, choosing only that repository. In its Settings >
-   Collaborators, invite Dhruvsa1 once. The organizer must accept.
-   The setup buttons on Results open the GitHub pages; finish each step there.
-7. For each recording: choose Sign in to GitHub, enter the one-time code at
-   github.com/login/device, and authorize Nose Calibration. Check the account shown.
-   Review the sharing notice, check its consent box, then choose Encrypt and share.
-   Use only the code shown by your collector, never a code someone sends you.
-   Signing in alone does not upload a recording. Wait for a completion receipt.
-   If organizer access is pending, wait for acceptance and share again to verify.
+GET AND CHECK THE SETUP FILE
+1. Use only the Windows setup file the organizer gave you directly, for example
+   NoseCalibration-Setup-0.1.0-preview-win-x64.exe.
+2. Before running it, make sure its SHA-256 matches the value the organizer
+   published separately (for example in the study announcement, not the
+   download page). Any SHA-256 tool works; one built-in option is PowerShell's
+   Get-FileHash. If they differ, or you cannot check, do not run it; contact
+   the organizer. A .sha256 file next to the setup file only detects damage:
+   anyone who changed the download could change it too.
 
-Microsoft Edge WebView2 Runtime is required; it is commonly already installed.
-If the app reports it missing, obtain it from Microsoft's official WebView2 download page.
-No Python, developer tools, GitHub CLI, or .NET installation is required.
+INSTALL AND OPEN
+No administrator access, ZIP extraction, PowerShell, Python, .NET, developer
+tools or GitHub needed.
+3. Double-click the setup file and follow the wizard. It installs for your
+   Windows account only and adds a Start menu entry. If Setup says Nose
+   Calibration is running, close the app first. Choose Finish; Setup does not
+   open the app or start recording.
+4. Open Nose Calibration from the Start menu.
 
-This package is not code-signed. Windows may warn before opening it. If you are
-unsure, stop and contact the organizer. Do not disable security software.
+PRACTICE
+5. Read the recording notice, check consent, and choose Start session.
+6. Work through the practice questions normally. Accuracy is optional.
+7. Choose Submit Test when finished, or Stop recording at any time.
+   Closing the app also stops recording.
 
-Optional: Install.ps1 copies the extracted app into your per-user Programs folder
-and creates a Start menu shortcut. It does not need administrator access and adds
-no startup entry. To use it, right-click Install.ps1 and choose Run with PowerShell;
-the window shows the result and waits for Enter. It first checks every file
-against package-files.json and stops, changing nothing, if a file is missing,
-altered or extra. Each run installs into a new folder; earlier installs are kept.
-You can run the app directly without this script. If Windows does not run the
-script, skip it. Do not change PowerShell execution policy or disable security
-software to install it.
+SHARE WITH AN INVITATION CODE (optional, once the organizer enables it)
+8. On Results, paste the invitation code the organizer gave you and choose
+   Connect. Keep the code private. A code works for at most 7 days and up to
+   3 recordings. The connection is kept in app memory only; Disconnect or
+   closing the app clears it. Connecting uploads nothing and is not consent.
+9. Read the sharing notice, check its separate consent box, then choose
+   Encrypt and share. The recording is encrypted on this computer with the
+   organizer's public key; the organizer decrypts it on their own computer.
+   Only completed human recordings can be shared. Stopped, timed-out, test
+   and Codex runs cannot; the app makes the final check.
+   - Stored: the study service holds an encrypted copy.
+   - Received by organizer: the organizer downloaded it. This confirms
+     delivery only; it does not mean the recording was checked or validated.
+   If sharing fails, it may still have left an encrypted copy on the service.
+   Do not treat it as received. Contact the organizer, and retry the same
+   recording from Earlier recordings only when they advise.
 
-Recording is limited to the focused practice interface. It includes pointer,
-click, keyboard and scroll events, answers, and throttled page screenshots.
-No recording occurs before you explicitly start. Closing the app stops recording.
-Your local recordings are in %LOCALAPPDATA%/NoseCalibration/sessions.
-Use Earlier recordings on the start screen to open a saved session and retry
-sharing. Opening an earlier recording does not restart recording.
-An exported ZIP contains readable private recording data: share it deliberately.
+WHAT IS RECORDED
+Only the focused practice interface: pointer, click, keyboard and scroll
+events, answers, and throttled screenshots taken on clicks. Nothing is recorded
+before you start or after you stop. Recordings stay on this computer unless you
+share them, in %LOCALAPPDATA%/NoseCalibration/sessions. Earlier recordings on
+the start screen reopens a saved session without restarting recording. An
+exported ZIP contains readable private recording data: share it deliberately.
+Numeric aggregate metrics may receive optional Codex advisory review; raw code,
+key presses and screenshots are not automatically sent to an AI model.
+No setup can guarantee zero risk or anonymity.
 
-GitHub sharing writes encrypted recordings to your selected private inbox.
-The app does not create repositories, install itself or invite anyone.
-The GitHub App requires Contents read/write and Metadata read-only for that one
-repository. Never choose All repositories. Other collaborators block sharing.
-Personal GitHub repositories grant collaborators write access: the organizer can
-decrypt submitted recordings and read, change or delete inbox files, including
-future shared sessions, until you remove them. This is standing access.
-Device sign-in does not use GitHub CLI or other saved GitHub logins.
-The access token is kept only in app memory, for at most eight hours, and is not
-saved. Sign out or closing the app clears it locally without revoking GitHub
-authorization. Refresh tokens are discarded. To revoke, open GitHub Settings >
-Applications > Authorized GitHub Apps and revoke Nose Calibration. Manage or
-uninstall the repository installation under Installed GitHub Apps. Remove the
-organizer separately in repository settings. These actions do not erase copies
-already received. Numeric aggregate metrics may receive optional Codex advisory
-review; raw code, key presses and screenshots are not automatically sent to a model.
-Failed/interrupted sharing may leave encrypted files in your private repository.
+WINDOWS NOTES
+Microsoft Edge WebView2 Runtime is required and is commonly installed. If the
+app reports it missing, get it from Microsoft's official WebView2 page.
+The setup file and app are not code-signed. Windows may show a security
+warning. If you are unsure, stop and contact the organizer. Do not disable
+security software or change security settings to get past a warning.
+To remove the app, use Windows Settings > Apps > Installed apps. Uninstalling
+removes the program, not your recordings. Close the app before installing a
+newer preview or uninstalling.
 
-See Nose-Calibration-Setup.pdf for the illustrated participant guide when included.
-Development preview packages may omit the PDF and are not approved study releases.
-Live GitHub upload and end-to-end participant validation remain untested.
+APPENDIX: EARLIER GITHUB SHARING (only if the organizer asks)
+GitHub is not needed for invitation sharing. Use this route only for earlier
+recordings or when the organizer specifically asks. Under Results, open
+Earlier GitHub sharing.
+- Once: create a private personal repository named exactly
+  nose-calibration-submissions. Install the Nose Calibration GitHub App with
+  Only select repositories, choosing only that repository (never All
+  repositories); it requests Contents read/write and Metadata read-only. In
+  the repository's Settings > Collaborators, invite Dhruvsa1 once; the
+  organizer must accept. Other collaborators block sharing. The app creates,
+  installs and invites nothing itself.
+- Each recording: choose Sign in to GitHub, enter only the code your collector
+  shows at github.com/login/device, and check the account shown. Signing in
+  uploads nothing. Check the separate consent box, then Encrypt and share.
+  Stored is not a final receipt while organizer access is pending: wait for
+  acceptance, then share again to verify.
+- Access: the organizer keeps standing write access to that repository and
+  can read, change or delete its files, including future shares, until you
+  remove them. The token stays in app memory for at most eight hours and is
+  not saved. Sign out or closing clears it locally but does not revoke
+  GitHub authorization: revoke under GitHub Settings > Applications >
+  Authorized GitHub Apps. None of these erase copies already received.
+
+APPENDIX: ZIP PACKAGE (only if the organizer gives you a ZIP instead)
+Check the ZIP's SHA-256 against the organizer's separate value as above.
+Extract the entire ZIP into a new, empty folder you own and open
+NoseCalibration.exe there. This route adds no Start menu entry.
+
+See Nose-Calibration-Setup.pdf for the illustrated guide when included.
+Development preview packages may omit the PDF and are not approved releases.
+Live invitation upload, live GitHub upload and clean-machine installation
+remain unverified.
