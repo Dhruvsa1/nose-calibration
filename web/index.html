@@ -242,6 +242,16 @@
             <label class="visually-hidden" for="admin-prompt">Instructions for Codex</label>
             <textarea id="admin-prompt" class="admin-prompt" rows="2" spellcheck="false" aria-describedby="admin-terms">Complete all five practice questions correctly. Use the personalized input tools and inspect results. Get 5/5.</textarea>
 
+            <label class="check" for="admin-corrections">
+              <input id="admin-corrections" type="checkbox">
+              <span class="check-box" aria-hidden="true"></span>
+              <span class="check-text">
+                Optional synthetic typo corrections. In the answer editor, the Admin host may occasionally type a
+                neighboring wrong key and delete it at once. Checks final text; interrupted typing requires review.
+                Applies when a run starts.
+              </span>
+            </label>
+
             <div class="admin-foot">
               <ul id="admin-terms" class="admin-terms">
                 <li>Local practice only. Nothing starts until you press <strong>Start Codex practice</strong>.</li>

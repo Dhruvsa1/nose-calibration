@@ -168,6 +168,19 @@
  document.addEventListener('scroll',e=>event('scroll',{top:e.target.scrollTop||0,left:e.target.scrollLeft||0,region:region(e)}),true);
  document.addEventListener('focusin',e=>event('focus',{region:region(e)}),true);
  document.addEventListener('selectionchange',()=>{const e=document.activeElement;if(e?.id==='code-editor')event('selection',{start:e.selectionStart,end:e.selectionEnd,region:'answer-area'});});
+ // Private Admin edition only: answers one host nonce query with owned-editor metadata (element token, IME
+ // composition, caret/selection, length, digests before/after the selection, caret-line indentation whitespace,
+ // input count) so the host can gate and verify an optional synthetic correction. Answer text is never sent.
+ const ownedField=t=>['code-editor','text-answer'].includes(t?.id),editorTargets=new WeakMap();
+ const fnv=s=>{let h=0x811c9dc5;for(let i=0;i<s.length;i++)h=Math.imul(h^s.charCodeAt(i),0x01000193)>>>0;return h;};
+ let composing=false,editorInputs=0,editorTarget=0;
+ document.addEventListener('compositionstart',()=>{composing=true;},true);document.addEventListener('compositionend',()=>{composing=false;},true);
+ document.addEventListener('input',e=>{if(ownedField(e.target))editorInputs++;},true);
+ native?.addEventListener('message',e=>{const m=e.data;if(m?.kind!=='admin-editor-query'||!adminEdition||!/^[a-f0-9]{32}$/.test(m.id))return;
+  const f=document.activeElement,owned=document.hasFocus()&&ownedField(f)&&f.isConnected!==false,v=owned?String(f.value):'',start=owned?f.selectionStart:0,end=owned?f.selectionEnd:0;
+  if(owned&&!editorTargets.has(f))editorTargets.set(f,++editorTarget);const line=v.slice(0,start).split('\n').pop();
+  post('admin-editor-state',{id:m.id,owned,composing,target:owned?editorTargets.get(f):0,multiline:owned&&f.id==='code-editor',start,end,length:v.length,
+   head:fnv(v.slice(0,start)),tail:fnv(v.slice(end)),lead:line.match(/^\s*/)[0],blank:line.trim()==='',open:line.trimEnd().endsWith('{'),inputs:editorInputs});});
  window.addEventListener('blur',()=>{flush();});
  setInterval(flush,100);
  setInterval(()=>{if(running){const s=Math.max(0,1800-Math.floor((performance.now()-started)/1000));$('timer').textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}},1000);
@@ -284,7 +297,7 @@
  $('open-data').onclick=()=>post('open');$('open-first').onclick=()=>show(0);$('back-overview').onclick=()=>{save();tasks();page('overview');};$('previous').onclick=()=>show(Math.max(0,current-1));$('next').onclick=()=>show(Math.min(questions.length-1,current+1));$('run-code').onclick=check;$('finish-session').onclick=()=>finish();$('stop-recording').onclick=()=>{if(!running)return;save();flush();revision++;finishing=true;updateSharing();post('stop');};
  $('sign-in').onclick=()=>{$('sign-in').disabled=true;post('signin');};$('sign-out').onclick=()=>post('signout');$('share-session').disabled=true;$('share-consent').onchange=updateSharing;$('share-session').onclick=()=>{if(signedIn&&!finishing&&!sitesBusy&&$('share-consent').checked)post('share',{consent:true});};$('export-session').onclick=()=>{if(!finishing)post('export');};$('new-session').onclick=()=>{revision++;finishing=false;answers=questions.map(q=>q.starter||'');grades={};current=0;page('welcome');$('consent').checked=false;$('start-session').disabled=true;post('list-sessions');};
  $('refresh-sessions').onclick=()=>post('list-sessions');$('saved-session').onchange=()=>{$('load-session').disabled=!$('saved-session').value;};$('load-session').onclick=()=>{const id=$('saved-session').value;if(/^[a-f0-9]{32}$/.test(id))post('load-session',{sessionId:id});};
- $('admin-run').onclick=()=>{if(adminEdition&&!running&&!finishing&&!adminStarting&&!sitesIntakeActive()){adminStarting=true;$('admin-run').disabled=true;updateIntakeControls();post('admin-start',{model:$('admin-model').value,effort:$('admin-effort').value,prompt:$('admin-prompt').value});}};
+ $('admin-run').onclick=()=>{if(adminEdition&&!running&&!finishing&&!adminStarting&&!sitesIntakeActive()){adminStarting=true;$('admin-run').disabled=true;updateIntakeControls();post('admin-start',{model:$('admin-model').value,effort:$('admin-effort').value,prompt:$('admin-prompt').value,syntheticCorrections:$('admin-corrections').checked===true});}};
  $('sites-intake-capability').addEventListener('input',updateSitesIntake);$('sites-intake-capability').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();requestSitesIntake('start');}});
  $('sites-intake-start').onclick=()=>requestSitesIntake('start');$('sites-intake-stop').onclick=()=>requestSitesIntake('stop');
  $('intake-refresh').onclick=()=>requestIntake('queue');$('intake-catchup').onclick=()=>requestIntake('catchup');$('intake-start').onclick=()=>requestIntake('start');$('intake-stop').onclick=()=>requestIntake('stop');
