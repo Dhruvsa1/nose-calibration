@@ -25,6 +25,8 @@ internal partial class CollectorForm : Form
     internal bool recording;
     internal string? session;
     internal string mode = "human";
+    // Test bound to the current or loaded session; set only by StartSession or LoadSession.
+    internal Assessments.Test? sessionTest;
     StreamWriter? events;
     DateTime started, lastShot;
     long eventCount, shotCount, eventBytes, screenshotBytes;
@@ -118,7 +120,7 @@ internal partial class CollectorForm : Form
                 switch (command)
                 {
                     case "ready": Send(new { kind = "edition", mode = Text.Contains("Admin") ? "admin" : "collector" }); SendAccount(); SendSitesAccount(); ListSessions(); break;
-                    case "start": bool allowed = true; AllowHumanStart(ref allowed); if (allowed && payload.GetProperty("consent").GetBoolean()) StartSession(); break;
+                    case "start": bool allowed = true; AllowHumanStart(ref allowed); if (allowed && payload.GetProperty("consent").GetBoolean()) StartSession(Assessments.Require(payload)); break;
                     case "events":
                         if (!recording || GetForegroundWindow() != Handle || !ContainsFocus) break;
                         var batch = payload.GetProperty("events");
@@ -136,19 +138,25 @@ internal partial class CollectorForm : Form
                         break;
                     case "snapshot": if (recording) await Snapshot(payload.GetProperty("eventId").GetInt64()); break;
                     case "finish":
+                        bool answersMatch = true;
                         if (session != null && recording)
                         {
                             string answerJson = payload.GetProperty("answers").GetRawText();
                             if (System.Text.Encoding.UTF8.GetByteCount(answerJson) > 200000) throw new InvalidDataException("Answers exceed size limit");
-                            File.WriteAllText(Path.Combine(session, "answers.json"), answerJson);
+                            // Answers must name this session's test; a mismatch is not saved, but capture still ends.
+                            answersMatch = sessionTest != null && Assessments.AnswersMatch(payload.GetProperty("answers"), sessionTest);
+                            if (answersMatch) File.WriteAllText(Path.Combine(session, "answers.json"), answerJson);
                         }
-                        StopSession("completed"); Send(new { kind = "stopped", folder = session, events = eventCount, screenshots = shotCount }); break;
+                        StopSession("completed"); Send(new { kind = "stopped", folder = session, events = eventCount, screenshots = shotCount });
+                        if (!answersMatch) throw new InvalidDataException("Answers did not match this session's test and were not saved.");
+                        break;
                     case "finalized":
                         // Grading can finish after capture has stopped. Never update a different or active session.
                         if (session == null || recording || sharing || payload.GetProperty("sessionId").GetString() != Path.GetFileName(session)) break;
                         if (File.Exists(Path.Combine(session, "upload-state.json"))) break;
                         string finalAnswers = payload.GetProperty("answers").GetRawText();
                         if (System.Text.Encoding.UTF8.GetByteCount(finalAnswers) > 200000) throw new InvalidDataException("Answers exceed size limit");
+                        if (sessionTest == null || !Assessments.AnswersMatch(payload.GetProperty("answers"), sessionTest)) throw new InvalidDataException("Answers did not match this session's test and were not saved.");
                         File.WriteAllText(Path.Combine(session, "answers.json"), finalAnswers);
                         break;
                     case "stop": StopSession("stopped by participant"); Send(new { kind = "stopped", folder = session, events = eventCount, screenshots = shotCount }); break;
@@ -197,17 +205,17 @@ internal partial class CollectorForm : Form
         };
         web.Source = new Uri("https://nose.local/index.html"); clock.Start();
     }
-    internal void StartSession()
+    internal void StartSession(Assessments.Test test)
     {
         if (recording) return;
         if (shotBusy) throw new InvalidOperationException("Wait for the pending screenshot to finish before starting another recording.");
         if (sharing || sitesConnection.Connecting) throw new InvalidOperationException("Wait for the current upload to finish before starting another recording.");
         if (!Text.Contains("Admin")) mode = verificationMode ? "verification" : "human";
         string id = Guid.NewGuid().ToString("N"); session = Path.Combine(DataRoot, "sessions", id); Directory.CreateDirectory(session);
-        started = DateTime.UtcNow; eventCount = shotCount = eventBytes = screenshotBytes = 0; lastShot = DateTime.MinValue;
-        File.WriteAllText(Path.Combine(session, "manifest.json"), JsonSerializer.Serialize(new { schemaVersion = 1, sessionId = id, mode, startedAt = started, appVersion = "0.1.0", consent = true, scope = "Nose Calibration web interface only", screenshot = "click-triggered page JPEG; throttled 750ms; no other apps", telemetry = "pointer,key,wheel,scroll,focus,selection,input metadata and final answers" }));
+        started = DateTime.UtcNow; eventCount = shotCount = eventBytes = screenshotBytes = 0; lastShot = DateTime.MinValue; sessionTest = test;
+        File.WriteAllText(Path.Combine(session, "manifest.json"), JsonSerializer.Serialize(new { schemaVersion = Assessments.ManifestVersion, sessionId = id, mode, startedAt = started, appVersion = "0.1.0", testId = test.Id, testVersion = test.Version, questionCount = test.QuestionCount, consent = true, scope = "Nose Calibration web interface only", screenshot = "click-triggered page JPEG; throttled 750ms; no other apps", telemetry = "pointer,key,wheel,scroll,focus,selection,input metadata and final answers" }));
         events = new StreamWriter(Path.Combine(session, "events.jsonl")) { AutoFlush = true }; recording = true;
-        Send(new { kind = "started", sessionId = id, mode });
+        Send(new { kind = "started", sessionId = id, mode, testId = test.Id, testVersion = test.Version, questionCount = test.QuestionCount });
     }
     internal void StopSession(string reason)
     {
@@ -321,7 +329,8 @@ internal partial class CollectorForm : Form
             string manifestPath = Path.Combine(directory.FullName, "manifest.json");
             if (!File.Exists(manifestPath) || new FileInfo(manifestPath).Length > 200000) continue;
             try { using var manifest = JsonDocument.Parse(File.ReadAllText(manifestPath)); var m = manifest.RootElement; if (m.GetProperty("sessionId").GetString() != directory.Name) continue;
-                list.Add(new { id = directory.Name, startedAt = m.GetProperty("startedAt").GetString(), mode = m.GetProperty("mode").GetString() }); }
+                var test = Assessments.FromManifest(m);
+                list.Add(new { id = directory.Name, startedAt = m.GetProperty("startedAt").GetString(), mode = m.GetProperty("mode").GetString(), testId = test.Id, testVersion = test.Version, questionCount = test.QuestionCount }); }
             catch { /* An incomplete/corrupt session cannot be offered for loading. */ }
         }
         Send(new { kind = "sessions", sessions = list });
@@ -332,7 +341,7 @@ internal partial class CollectorForm : Form
         if (!SessionName(id)) throw new InvalidDataException("Invalid session ID");
         var loaded = CollectorSessionFiles.ReadCompleted(Path.Combine(DataRoot, "sessions"), id!);
         // Commit selection only after every source file and counter has validated.
-        session = loaded.Folder; mode = loaded.Mode; eventCount = loaded.EventCount; shotCount = loaded.ScreenshotCount;
-        Send(new { kind = "loaded", sessionId = id, mode, events = eventCount, screenshots = shotCount, answers = loaded.Answers });
+        session = loaded.Folder; mode = loaded.Mode; eventCount = loaded.EventCount; shotCount = loaded.ScreenshotCount; sessionTest = loaded.Test;
+        Send(new { kind = "loaded", sessionId = id, mode, testId = sessionTest.Id, testVersion = sessionTest.Version, questionCount = sessionTest.QuestionCount, events = eventCount, screenshots = shotCount, answers = loaded.Answers });
     }
 }

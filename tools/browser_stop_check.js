@@ -10,7 +10,7 @@ async (page) => {
         addEventListener: (_, listener) => listeners.push(listener),
         postMessage: message => {
           window.__messages.push({ ...message, observedAt: performance.now() });
-          if (message.command === 'start') setTimeout(() => listeners.forEach(listener => listener({ data: { kind: 'started', mode: 'verification', sessionId: 'a'.repeat(32) } })), 0);
+          if (message.command === 'start') setTimeout(() => listeners.forEach(listener => listener({ data: { kind: 'started', mode: 'verification', sessionId: 'a'.repeat(32), testId: message.testId, testVersion: message.testVersion, questionCount: message.questionCount } })), 0);
         }
       };
     });

@@ -1,6 +1,6 @@
 # Nose Calibration
 
-Windows practice-assessment collector, currently a development preview. The collector is a .NET 8 WinForms host with a local WebView2 interface. The web interface contains multiple choice, fill-in-the-blank, dropdown, and two JavaScript coding questions.
+Windows practice-assessment collector, currently a development preview. The collector is a .NET 8 WinForms host with a local WebView2 interface. The participant chooses one of two fixed tests before starting: the original five questions (multiple choice, fill-in-the-blank, dropdown and two JavaScript coding questions) or a thirteen-question test (ten multiple choice and three easy JavaScript coding questions).
 
 ## Preview
 
@@ -9,6 +9,28 @@ Build `collector/NoseCalibration.csproj` in Release mode. Microsoft Edge WebView
 Recording begins only after consent and **Start session**. **Stop recording** or **Submit Test** ends recording. Only the focused assessment page is recorded: pointer, click, keyboard, scrolling, selection and answer metadata; final answers; and click-triggered page screenshots (750 ms throttle, 120-image cap). Other applications and browser tabs are outside the collector's capture scope.
 
 Local sessions are stored under `%LOCALAPPDATA%/NoseCalibration/sessions`. `--verification` marks a developer test session separately so the ingestion validator rejects it as participant data.
+
+## Test selection
+
+The welcome page asks which test to take before **Start session**:
+
+| Test ID | Version | Questions | Content |
+|---|---|---|---|
+| `practice-js-5` | 1 | 5 | The original assessment: unchanged questions and grading. |
+| `practice-js-13` | 1 | 13 | 10 multiple choice and 3 easy JavaScript coding questions, all new. |
+
+The selection is fixed at Start. The page sends the exact test ID, version and question count. The host accepts only a known tuple and writes it to a schema 2 manifest. The page accepts only the tuple the host echoes back; otherwise it stops the recording. The session keeps that test through stop, submit, host stop and results. Every new session starts with fresh answers, grades and navigation. Loading an earlier recording binds that recording's own test.
+
+The tuple is checked again at every stage. The host rejects answers that name a different test or hold the wrong number of values. Loading a session, the bundle validator and the private Admin corpus each require a known exact tuple; a mismatched or unrecognized tuple is rejected. A client-reported count alone is never trusted. Recordings made before test selection (schema 1 manifests without test fields) remain valid and always mean `practice-js-5` version 1. Their manifests may not name a test, and their answers may hold at most five values. A changed question set needs a new version in `web/questions.js`, `collector/Assessments.cs` and `tools/validate_bundle.py`; it must never be edited in place.
+
+Coding answers in both tests run only in the existing sandboxed grader worker: a function-name allowlist, a two-second timeout and the same CSP. `node tools/test_assessments.js` runs 92 synthetic checks:
+
+- the registry, including a hash proving the original five questions are byte-identical;
+- deterministic grading of reference and wrong solutions for all five coding questions;
+- fresh per-session state, the frozen tuple and 13/13, 12/13 and 5/5 scoring;
+- rejection of unknown or mismatched tuples and load binding.
+
+`tools/test_validate_bundle.py` and the session-files harness cover legacy, new and wrong tuples.
 
 ## Current verification
 

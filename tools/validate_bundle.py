@@ -3,6 +3,26 @@ import collections, hashlib, io, json, math, re, statistics, struct, zipfile
 
 MAX_ZIP = 30 * 1024 * 1024
 KINDS = {'pointermove','pointerdown','pointerup','keydown','keyup','wheel','scroll','focus','selection','input','grade','question','screenshot'}
+# Known assessments, (testId, testVersion) -> questionCount; the same table as web/questions.js and
+# collector/Assessments.cs. The exact tuple is required, never inferred from a client-reported count.
+# Manifest schemaVersion 1 predates test selection, has no test fields and always means the original test.
+TESTS = {('practice-js-5', 1): 5, ('practice-js-13', 1): 13}
+LEGACY_TEST = ('practice-js-5', 1, 5)
+TEST_FIELDS = ('testId', 'testVersion', 'questionCount')
+
+def exact_test(value):
+    test_id, version, count = (value.get(f) for f in TEST_FIELDS)
+    if not isinstance(test_id, str) or type(version) is not int or type(count) is not int or TESTS.get((test_id, version)) != count:
+        raise ValueError('Unknown or mismatched test')
+    return test_id, version, count
+
+def manifest_test(manifest):
+    schema = manifest.get('schemaVersion')
+    if type(schema) is int and schema == 1:
+        if any(f in manifest for f in TEST_FIELDS): raise ValueError('Legacy manifest must not name a test')
+        return LEGACY_TEST, 'legacy-manifest-v1'
+    if type(schema) is int and schema == 2: return exact_test(manifest), 'manifest-v2'
+    raise ValueError('Invalid manifest')
 
 def object_json(raw):
     def pairs(items):
@@ -86,7 +106,8 @@ def validate(raw, session_id):
                 w,h=jpeg_dimensions(data);images.append({'file':name,'width':w,'height':h,'sha256':hashlib.sha256(data).hexdigest()})
             else:files[name]=data
         manifest=object_json(files['manifest.json'])
-        if manifest.get('schemaVersion')!=1 or manifest.get('sessionId')!=session_id or manifest.get('consent') is not True or manifest.get('mode') not in ('human','codex') or manifest.get('appVersion')!='0.1.0': raise ValueError('Invalid manifest')
+        test,test_source=manifest_test(manifest)
+        if manifest.get('sessionId')!=session_id or manifest.get('consent') is not True or manifest.get('mode') not in ('human','codex') or manifest.get('appVersion')!='0.1.0': raise ValueError('Invalid manifest')
         counts=collections.Counter();key_times=[];holds=[];down={};last=-1;last_id=0;regions=collections.Counter();screenshot_refs=set();corrections=0
         lines=files['events.jsonl'].splitlines()
         if len(lines)>250120: raise ValueError('Event count limit')
@@ -128,9 +149,17 @@ def validate(raw, session_id):
         answers=object_json(files.get('answers.json',b'{}'))
         if not isinstance(answers,dict):raise ValueError('Invalid answers')
         # Values remain untrusted and are never executed. Scan likely accidental secrets.
-        values=answers.get('values',[])
-        if not isinstance(values,list) or len(values)>5 or any(not isinstance(s,str) or len(s)>30000 for s in values):raise ValueError('Invalid answer sizes')
+        values=answers.get('values',[]);count=test[2]
+        # Answers from a test-aware page name the recording's test and hold one value per question.
+        named=any(f in answers for f in TEST_FIELDS)
+        if named and exact_test(answers)!=test:raise ValueError('Answers name a different test')
+        if 'answers.json' in files and not named and test_source!='legacy-manifest-v1':raise ValueError('Answers must name the recording test')
+        if not isinstance(values,list) or (len(values)!=count if named else len(values)>count) or any(not isinstance(s,str) or len(s)>30000 for s in values):raise ValueError('Invalid answer sizes')
+        if 'total' in answers and (type(answers['total']) is not int or answers['total']!=count):raise ValueError('Invalid answer total')
+        if 'score' in answers and (type(answers['score']) is not int or not 0<=answers['score']<=count):raise ValueError('Invalid answer score')
+        grades=answers.get('grades',{})
+        if not isinstance(grades,dict) or any(not re.fullmatch(r'0|[1-9][0-9]{0,2}',k) or int(k)>=count for k in grades):raise ValueError('Invalid grades')
         if re.search(r'(?:sk-(?:ant-|proj-)|gh[pousr]_|-----BEGIN .*PRIVATE KEY)', '\n'.join(values)):flags.append('possible_secret_in_answer')
-        metrics={'schemaVersion':1,'sessionId':session_id,'mode':manifest['mode'],'events':dict(counts),'regions':dict(regions),'durationMs':max(last,0),'screenshotCount':len(images),'keyIntervalMedianMs':statistics.median(gaps) if gaps else None,'keyHoldMedianMs':statistics.median(holds) if holds else None,'pausesOver500Ms':sum(g>500 for g in gaps),'correctionKeys':corrections,'flags':flags,'provenance':'client-reported; not proof of human origin','bundleSha256':hashlib.sha256(raw).hexdigest()}
+        metrics={'schemaVersion':1,'sessionId':session_id,'mode':manifest['mode'],'assessment':{'testId':test[0],'testVersion':test[1],'questionCount':test[2],'source':test_source},'events':dict(counts),'regions':dict(regions),'durationMs':max(last,0),'screenshotCount':len(images),'keyIntervalMedianMs':statistics.median(gaps) if gaps else None,'keyHoldMedianMs':statistics.median(holds) if holds else None,'pausesOver500Ms':sum(g>500 for g in gaps),'correctionKeys':corrections,'flags':flags,'provenance':'client-reported; not proof of human origin','bundleSha256':hashlib.sha256(raw).hexdigest()}
         if last>0 and len(lines)/(last/1000)>1500:flags.append('unusually_high_event_rate')
         return metrics

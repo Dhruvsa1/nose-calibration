@@ -4,7 +4,18 @@
  let grading=false, finishing=false, revision=0, sessionId='', signedIn=false, adminEdition=false;
  let adminBusy=false,adminStarting=false,intakeBusy=false,intakeRunning=false,intakePending=null;
  let sitesConnected=false,sitesBusy='',sitesFailed=false,sitesEpoch=0,sitesShareEpoch=-1;
+ // Test selection. Each session is bound to one known {testId, testVersion, questionCount} tuple, confirmed by
+ // the host on start or load, until the next start or load. The welcome selector only picks the next start.
+ const assessments=Array.isArray(window.assessments)?window.assessments:[];
+ const knownTest=(id,version,count)=>assessments.find(a=>a.testId===id&&a.testVersion===version&&a.questionCount===count&&a.questions.length===count)||null;
+ const tuple=a=>({testId:a.testId,testVersion:a.testVersion,questionCount:a.questionCount});
+ // No checked option (synthetic stubs) means the original test, as before selection existed.
+ const selectedTest=()=>assessments.find(a=>$('test-'+a.testId)?.checked===true)||assessments[0]||null;
+ let active=assessments[0],questions=active.questions,pendingTest=null,rejectedStart=false;
  let running=false, mode='human', current=0, seq=0, started=0, batch=[], answers=questions.map(q=>q.starter||''), grades={}, count=0;
+ // Fresh answers, grades and navigation for every bound session; nothing carries over between tests or sessions.
+ function bind(test,id){active=test;questions=test.questions;answers=questions.map(q=>q.starter||'');grades={};current=0;window.assessmentSession=Object.freeze({...tuple(test),sessionId:id,questions});const r=$('test-'+test.testId);if(r)r.checked=true;syncAdminPrompt(test);}
+ function updateSelector(){const locked=running||finishing||grading||adminBusy||adminStarting;for(const a of assessments){const r=$('test-'+a.testId);if(r)r.disabled=locked;}}
  const post=(command,extra={})=>native?.postMessage({command,...extra});
  const toast=message=>{$('toast').textContent=message;};
  function updateIntakeControls(){
@@ -184,10 +195,10 @@
  window.addEventListener('blur',()=>{flush();});
  setInterval(flush,100);
  setInterval(()=>{if(running){const s=Math.max(0,1800-Math.floor((performance.now()-started)/1000));$('timer').textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}},1000);
- function tasks(){const list=$('task-list');list.replaceChildren();questions.forEach((q,i)=>{const tr=document.createElement('tr');tr.className='task-row';for(const text of [`${i+1}. ${q.title}`,q.type,grades[i]?.passed?'Passed':answers[i]&&answers[i]!==q.starter?'In progress':'Not started']){const td=document.createElement('td');td.textContent=text;tr.append(td);}const td=document.createElement('td'),b=document.createElement('button');b.className='solve-button';b.textContent='Solve';b.onclick=()=>show(i);td.append(b);tr.append(td);list.append(tr);});}
+ function tasks(){const coding=questions.filter(q=>q.type==='Coding').length;$('basics-count').textContent=`${questions.length-coding} questions`;$('coding-count').textContent=`${coding} questions`;const list=$('task-list');list.replaceChildren();questions.forEach((q,i)=>{const tr=document.createElement('tr');tr.className='task-row';for(const text of [`${i+1}. ${q.title}`,q.type,grades[i]?.passed?'Passed':answers[i]&&answers[i]!==q.starter?'In progress':'Not started']){const td=document.createElement('td');td.textContent=text;tr.append(td);}const td=document.createElement('td'),b=document.createElement('button');b.className='solve-button';b.textContent='Solve';b.onclick=()=>show(i);td.append(b);tr.append(td);list.append(tr);});}
  function save(){const e=$('code-editor')||$('text-answer')||$('choice-answer');if(e)answers[current]=e.value;else{const checked=document.querySelector('input[name=answer]:checked');if(checked)answers[current]=checked.value;}}
  function show(i){save();current=i;page('workspace');$('question-title').textContent=questions[i].type==='Coding'?'JavaScript · '+questions[i].title:questions[i].title;
-  $('question-nav').replaceChildren();questions.forEach((q,n)=>{const b=document.createElement('button');b.className='question-link'+(i===n?' active':'');b.textContent=String(n+1);b.title=q.title;b.onclick=()=>show(n);$('question-nav').append(b);});
+  $('question-nav').replaceChildren();questions.forEach((q,n)=>{const b=document.createElement('button');b.className='question-link'+(i===n?' active':'');if(n===0||(questions[n-1].type==='Coding')!==(q.type==='Coding')){b.className+=' section-start';b.dataset.section=q.type==='Coding'?'S2':'S1';}b.textContent=String(n+1);b.title=q.title;b.onclick=()=>show(n);$('question-nav').append(b);});
   const q=questions[i],problem=$('problem');problem.replaceChildren();const h=document.createElement('h1');h.textContent=q.title;problem.append(h);const p=document.createElement('p');p.className='problem-copy';p.textContent=q.prompt;problem.append(p);
   for(const detail of q.details||[]){const p=document.createElement('p');p.className='problem-copy';p.textContent=detail;problem.append(p);}if(q.example){const pre=document.createElement('pre');pre.className='example';pre.textContent=q.example;problem.append(pre);}
   const area=$('answer-area');area.replaceChildren();$('run-code').textContent=q.type==='Coding'?'Run code':'Check answer';
@@ -203,11 +214,12 @@
   return await new Promise(resolve=>{const worker=new Worker('grader.js');let ended=false;const done=r=>{if(ended)return;ended=true;clearTimeout(timer);worker.terminate();resolve(r);};const timer=setTimeout(()=>done({passed:false,message:'Execution timed out after 2 seconds.'}),2000);worker.onmessage=e=>{const r=e.data;done({passed:r?.passed===true,message:String(r?.message||'Invalid result').slice(0,4000)});};worker.onerror=()=>done({passed:false,message:'Code could not run. Check syntax.'});worker.postMessage({source:answers[i],fn:q.fn,tests:q.tests});});
  }
  async function check(){if(!running||grading||finishing)return;grading=true;save();$('test-output').textContent='Running checks…';const i=current,requestRevision=revision;try{const result=await grade(i);if(!running||finishing||revision!==requestRevision)return;grades[i]=result;if(i===current)$('test-output').textContent=result.message;event('grade',{index:i,passed:result.passed});}finally{grading=false;}}
- const snapshot=()=>({values:answers,grades,score:Object.values(grades).filter(g=>g.passed).length,total:questions.length,grading:'client-reported; not evidence of authentic human activity'});
+ const snapshot=()=>({...tuple(active),values:answers,grades,score:Object.values(grades).filter(g=>g.passed).length,total:questions.length,grading:'client-reported; not evidence of authentic human activity'});
  function hostStopped(){
   // Native Stop has already revoked capture. Preserve current answers without
   // executing code or restarting capture; stale grading replies cannot mutate it.
   if(running){save();running=false;revision++;finishing=false;batch=[];post('finalized',{sessionId,answers:snapshot()});}
+  else if(rejectedStart){rejectedStart=false;page('welcome');updateSharing();return;}
   results();
  }
  async function finish(gradeAll=true){if(!running)return;finishing=true;const finishRevision=++revision,finishedSession=sessionId;save();flush();running=false;
@@ -215,7 +227,7 @@
   post('finish',{answers:snapshot()});results();
   try{if(gradeAll){for(let i=0;i<questions.length;i++){const result=await grade(i);if(revision!==finishRevision)return;grades[i]=result;}post('finalized',{sessionId:finishedSession,answers:snapshot()});results();}}
   finally{if(revision===finishRevision){finishing=false;updateSharing();}}}
- function updateSharing(){$('share-session').disabled=!signedIn||!$('share-consent').checked||finishing||!!sitesBusy;$('export-session').disabled=finishing;$('sign-out').disabled=!signedIn;updateSites();updateIntakeControls();}
+ function updateSharing(){updateSelector();$('share-session').disabled=!signedIn||!$('share-consent').checked||finishing||!!sitesBusy;$('export-session').disabled=finishing;$('sign-out').disabled=!signedIn;updateSites();updateIntakeControls();}
  for(const [id,action] of [['github-create-repo','create'],['github-install-app','install'],['github-invite-organizer','invite']])$(id)?.addEventListener('click',()=>post('github-setup',{action}));
  function resetSharing(){$('share-consent').checked=false;$('receipt').textContent='';resetSites();$('sites-intake-capability').value='';updateSharing();}
  // Invitation sharing. The host keeps the connection in memory and re-checks every gate. The code
@@ -290,14 +302,18 @@
   }
  }
  $('new-session').addEventListener('click',resetSharing);
- function results(){running=false;page('results');$('recording-status').textContent='Recording stopped';$('recording-status').dataset.state='stopped';$('score-summary').textContent=`${Object.values(grades).filter(g=>g?.passed===true).length} / ${questions.length} questions passed`;$('metrics-summary').textContent=`${count.toLocaleString()} interaction events collected. Review the local files before sharing.`;updateSharing();}
+ function results(){running=false;page('results');$('recording-status').textContent='Recording stopped';$('recording-status').dataset.state='stopped';$('results-test').textContent=`${active.name} · ${active.questionCount} questions`;$('score-summary').textContent=`${Object.values(grades).filter(g=>g?.passed===true).length} / ${questions.length} questions passed`;$('metrics-summary').textContent=`${count.toLocaleString()} interaction events collected. Review the local files before sharing.`;updateSharing();}
  $('consent').onchange=()=>{$('start-session').disabled=!$('consent').checked||sitesIntakeActive();};
- $('start-session').onclick=()=>{if($('consent').checked&&!sitesIntakeActive())post('start',{consent:true});};
+ $('start-session').onclick=()=>{const t=selectedTest();if($('consent').checked&&!sitesIntakeActive()&&!running&&t){pendingTest=t;post('start',{consent:true,...tuple(t)});}};
+ // Admin default prompts follow the selected test until the prompt is edited.
+ const adminPrompts={'practice-js-5':'Complete all five practice questions correctly. Use the personalized input tools and inspect results. Get 5/5.','practice-js-13':'Complete all thirteen practice questions correctly. Use the personalized input tools and inspect results. Get 13/13.'};
+ function syncAdminPrompt(t){const p=$('admin-prompt');if(t&&Object.hasOwn(adminPrompts,t.testId)&&Object.values(adminPrompts).includes(p.value))p.value=adminPrompts[t.testId];}
+ for(const a of assessments){const r=$('test-'+a.testId);if(r)r.onchange=()=>syncAdminPrompt(selectedTest());}
  $('resume-last').disabled=true;$('resume-last').title='Sessions are immutable; start a new recording.';
  $('open-data').onclick=()=>post('open');$('open-first').onclick=()=>show(0);$('back-overview').onclick=()=>{save();tasks();page('overview');};$('previous').onclick=()=>show(Math.max(0,current-1));$('next').onclick=()=>show(Math.min(questions.length-1,current+1));$('run-code').onclick=check;$('finish-session').onclick=()=>finish();$('stop-recording').onclick=()=>{if(!running)return;save();flush();revision++;finishing=true;updateSharing();post('stop');};
  $('sign-in').onclick=()=>{$('sign-in').disabled=true;post('signin');};$('sign-out').onclick=()=>post('signout');$('share-session').disabled=true;$('share-consent').onchange=updateSharing;$('share-session').onclick=()=>{if(signedIn&&!finishing&&!sitesBusy&&$('share-consent').checked)post('share',{consent:true});};$('export-session').onclick=()=>{if(!finishing)post('export');};$('new-session').onclick=()=>{revision++;finishing=false;answers=questions.map(q=>q.starter||'');grades={};current=0;page('welcome');$('consent').checked=false;$('start-session').disabled=true;post('list-sessions');};
  $('refresh-sessions').onclick=()=>post('list-sessions');$('saved-session').onchange=()=>{$('load-session').disabled=!$('saved-session').value;};$('load-session').onclick=()=>{const id=$('saved-session').value;if(/^[a-f0-9]{32}$/.test(id))post('load-session',{sessionId:id});};
- $('admin-run').onclick=()=>{if(adminEdition&&!running&&!finishing&&!adminStarting&&!sitesIntakeActive()){adminStarting=true;$('admin-run').disabled=true;updateIntakeControls();post('admin-start',{model:$('admin-model').value,effort:$('admin-effort').value,prompt:$('admin-prompt').value,syntheticCorrections:$('admin-corrections').checked===true});}};
+ $('admin-run').onclick=()=>{const t=selectedTest();if(adminEdition&&!running&&!finishing&&!adminStarting&&!sitesIntakeActive()&&t){adminStarting=true;pendingTest=t;$('admin-run').disabled=true;updateIntakeControls();updateSelector();post('admin-start',{...tuple(t),model:$('admin-model').value,effort:$('admin-effort').value,prompt:$('admin-prompt').value,syntheticCorrections:$('admin-corrections').checked===true});}};
  $('sites-intake-capability').addEventListener('input',updateSitesIntake);$('sites-intake-capability').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();requestSitesIntake('start');}});
  $('sites-intake-start').onclick=()=>requestSitesIntake('start');$('sites-intake-stop').onclick=()=>requestSitesIntake('stop');
  $('intake-refresh').onclick=()=>requestIntake('queue');$('intake-catchup').onclick=()=>requestIntake('catchup');$('intake-start').onclick=()=>requestIntake('start');$('intake-stop').onclick=()=>requestIntake('stop');
@@ -312,9 +328,13 @@
   if(m.kind==='sites-intake-result'&&adminEdition)sitesIntakeResult(m.data);
   if(m.kind==='account'){signedIn=typeof m.login==='string'&&!!m.login;$('github-account').textContent=signedIn?'Signed in to GitHub as '+m.login:'Not signed in to GitHub';$('sign-in').disabled=false;updateSharing();}
   if(m.kind==='error'){$('sign-in').disabled=false;if(adminStarting){adminStarting=false;updateIntakeControls();}}
-  if(m.kind==='sessions'){const select=$('saved-session');select.replaceChildren();const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Choose an earlier recording';select.append(placeholder);for(const s of m.sessions||[]){if(!/^[a-f0-9]{32}$/.test(s.id))continue;const option=document.createElement('option');option.value=s.id;option.textContent=(s.startedAt||s.id)+' · '+s.mode;select.append(option);}$('load-session').disabled=true;}
-  if(m.kind==='loaded'){revision++;finishing=false;sessionId=m.sessionId;mode=m.mode;count=Number(m.events)||0;grades=m.answers?.grades&&typeof m.answers.grades==='object'?m.answers.grades:{};$('receipt').textContent='';$('share-consent').checked=false;resetSites();results();}
+  if(m.kind==='sessions'){const select=$('saved-session');select.replaceChildren();const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Choose an earlier recording';select.append(placeholder);for(const s of m.sessions||[]){if(!/^[a-f0-9]{32}$/.test(s.id))continue;const option=document.createElement('option');option.value=s.id;const t=knownTest(s.testId,s.testVersion,s.questionCount);option.textContent=(s.startedAt||s.id)+' · '+s.mode+(t?' · '+t.name:'');select.append(option);}$('load-session').disabled=true;}
+  if(m.kind==='loaded'){const t=knownTest(m.testId,m.testVersion,m.questionCount);if(!t){toast('This recording names an unknown test and was not opened.');return;}revision++;finishing=false;sessionId=m.sessionId;mode=m.mode;bind(t,sessionId);count=Number(m.events)||0;grades=m.answers?.grades&&typeof m.answers.grades==='object'?m.answers.grades:{};$('receipt').textContent='';$('share-consent').checked=false;resetSites();results();}
  });
- native?.addEventListener('message',e=>{const m=e.data;if(m.kind==='started'){sessionId=m.sessionId||'';revision++;finishing=false;running=true;mode=m.mode;started=performance.now();seq=count=0;batch=[];$('recording-status').textContent='Recording this test only';$('recording-status').dataset.state='recording';tasks();page('overview');updateSharing();}else if(m.kind==='stopped')hostStopped();else if(m.kind==='notice'||m.kind==='error')toast(m.message);else if(m.kind==='receipt'){$('receipt').textContent='Submitted successfully: '+m.url;}else if(m.kind==='admin-start'){answers=questions.map(q=>q.starter||'');grades={};post('admin-record-ready',{startId:m.startId});}});
+ native?.addEventListener('message',e=>{const m=e.data;if(m.kind==='started'){
+  // Accept only a known tuple, and only the one this page asked for. Otherwise stop the host recording.
+  const t=knownTest(m.testId,m.testVersion,m.questionCount);
+  if(!t||(pendingTest&&t!==pendingTest)){pendingTest=null;rejectedStart=true;running=false;post('stop');toast('The recording did not match the selected test and was stopped. Start a new session.');page('welcome');updateSharing();return;}
+  pendingTest=null;rejectedStart=false;sessionId=m.sessionId||'';bind(t,sessionId);revision++;finishing=false;running=true;mode=m.mode;started=performance.now();seq=count=0;batch=[];$('recording-status').textContent='Recording this test only';$('recording-status').dataset.state='recording';tasks();page('overview');updateSharing();}else if(m.kind==='stopped')hostStopped();else if(m.kind==='notice'||m.kind==='error')toast(m.message);else if(m.kind==='receipt'){$('receipt').textContent='Submitted successfully: '+m.url;}else if(m.kind==='admin-start'){answers=questions.map(q=>q.starter||'');grades={};post('admin-record-ready',{startId:m.startId});}});
  post('ready');
 })();

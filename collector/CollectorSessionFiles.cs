@@ -20,7 +20,7 @@ internal static class CollectorSessionFiles
         }
         finally { if (File.Exists(pendingFile)) File.Delete(pendingFile); }
     }
-    internal sealed record Completed(string Folder, string Mode, long EventCount, long ScreenshotCount, JsonElement? Answers);
+    internal sealed record Completed(string Folder, string Mode, long EventCount, long ScreenshotCount, JsonElement? Answers, Assessments.Test Test);
     static JsonDocument ReadObject(string path, long limit)
     {
         var info = new FileInfo(path);
@@ -38,8 +38,10 @@ internal static class CollectorSessionFiles
         if (!Directory.Exists(folder) || new DirectoryInfo(folder).Attributes.HasFlag(FileAttributes.ReparsePoint)) throw new InvalidDataException("Session is unavailable");
         using var manifest = ReadObject(Path.Combine(folder, "manifest.json"), 200000);
         var m = manifest.RootElement;
-        if (m.GetProperty("sessionId").GetString() != id || m.GetProperty("consent").ValueKind != JsonValueKind.True || m.GetProperty("schemaVersion").GetInt32() != 1)
+        if (m.GetProperty("sessionId").GetString() != id || m.GetProperty("consent").ValueKind != JsonValueKind.True)
             throw new InvalidDataException("Invalid recording manifest");
+        // Schema 1 maps explicitly to the original test; schema 2 must name a known test tuple.
+        var test = Assessments.FromManifest(m);
         string mode = m.GetProperty("mode").GetString()!;
         if (mode is not ("human" or "verification" or "codex")) throw new InvalidDataException("Invalid session mode");
         using var summary = ReadObject(Path.Combine(folder, "summary.json"), 200000);
@@ -48,8 +50,13 @@ internal static class CollectorSessionFiles
             throw new InvalidDataException("Invalid session counters or mode");
         JsonElement? answers = null;
         string answersPath = Path.Combine(folder, "answers.json");
-        if (File.Exists(answersPath)) { using var document = ReadObject(answersPath, 200000); answers = document.RootElement.Clone(); }
-        return new Completed(folder, mode, events, shots, answers);
+        if (File.Exists(answersPath))
+        {
+            using var document = ReadObject(answersPath, 200000);
+            if (!Assessments.AnswersMatch(document.RootElement, test)) throw new InvalidDataException("Recorded answers do not match the recording's test");
+            answers = document.RootElement.Clone();
+        }
+        return new Completed(folder, mode, events, shots, answers, test);
     }
     internal static void RequireHumanFinished(string session)
     {

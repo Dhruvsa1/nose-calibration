@@ -12,7 +12,7 @@ async (page) => {
       } };
     });
     await p.goto('http://127.0.0.1:48474/index.html');
-    await p.evaluate(() => window.deliver({ kind: 'started', mode: 'codex', sessionId: 'b'.repeat(32) }));
+    await p.evaluate(() => window.deliver({ kind: 'started', mode: 'codex', sessionId: 'b'.repeat(32), testId: 'practice-js-5', testVersion: 1, questionCount: 5 }));
     await p.locator('#task-list-coding .solve-button').first().click();
     const source = 'function summarize(numbers) { return {}; }';
     await p.locator('#code-editor').fill(source);

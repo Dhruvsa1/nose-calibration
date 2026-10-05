@@ -46,13 +46,61 @@ class ValidatorTests(unittest.TestCase):
         raw=self.bundle([])
         for changed in (raw[:-1],raw+b'trailing data',raw.replace(b'PK\x01\x02',b'NOPE',1)):
             with self.assertRaises(ValueError):validate(changed,SESSION)
-    def bundle(self, events, manifest=None):
+    def bundle(self, events, manifest=None, answers=None):
         out=io.BytesIO()
         with zipfile.ZipFile(out,'w') as z:
             z.writestr('manifest.json', manifest or json.dumps(dict(schemaVersion=1,sessionId=SESSION,consent=True,mode='human',appVersion='0.1.0')))
             z.writestr('summary.json','{}')
             z.writestr('events.jsonl','\n'.join(json.dumps(e) if isinstance(e,dict) else e for e in events))
+            if answers is not None: z.writestr('answers.json', answers if isinstance(answers,str) else json.dumps(answers))
         return out.getvalue()
+    # Test selection: exact known tuples; schemaVersion 1 maps to the original test without reinterpretation.
+    TUPLES={'practice-js-5':(1,5),'practice-js-13':(1,13)}
+    def manifest(self, schema=2, **fields):
+        return json.dumps(dict(schemaVersion=schema,sessionId=SESSION,consent=True,mode='human',appVersion='0.1.0',**fields))
+    def answers(self, test_id, version, count, values=None, score=None, total=None, grades=None):
+        values=['']*count if values is None else values
+        grades={str(i):dict(passed=True,message='ok') for i in range(count)} if grades is None else grades
+        return dict(testId=test_id,testVersion=version,questionCount=count,values=values,grades=grades,score=count if score is None else score,total=count if total is None else total,grading='client-reported')
+    def test_legacy_recording_maps_to_original_test(self):
+        legacy_answers=dict(values=['12','5','do...while','a','b'],grades={'0':dict(passed=True)},score=1,total=5)
+        for answers in (None, legacy_answers, dict(values=[])):
+            with self.subTest(answers=answers):
+                metrics=validate(self.bundle([],answers=answers),SESSION)
+                self.assertEqual(metrics['assessment'],dict(testId='practice-js-5',testVersion=1,questionCount=5,source='legacy-manifest-v1'))
+        for bad in (dict(values=['']*6), legacy_answers|dict(total=13), legacy_answers|dict(score=6), legacy_answers|dict(grades={'5':{}}),
+                    self.answers('practice-js-13',1,13), self.answers('practice-js-5',2,5)):
+            with self.subTest(bad=bad),self.assertRaises(ValueError): validate(self.bundle([],answers=bad),SESSION)
+        # A legacy manifest naming a test is not a legacy recording.
+        for fields in (dict(testId='practice-js-5'),dict(testId='practice-js-5',testVersion=1,questionCount=5),dict(questionCount=5)):
+            with self.subTest(fields=fields),self.assertRaises(ValueError): validate(self.bundle([],self.manifest(1,**fields)),SESSION)
+    def test_known_tuples_accepted(self):
+        for test_id,(version,count) in self.TUPLES.items():
+            with self.subTest(test_id=test_id):
+                m=self.manifest(testId=test_id,testVersion=version,questionCount=count)
+                metrics=validate(self.bundle([],m,self.answers(test_id,version,count)),SESSION)
+                self.assertEqual(metrics['assessment'],dict(testId=test_id,testVersion=version,questionCount=count,source='manifest-v2'))
+                self.assertEqual(validate(self.bundle([],m),SESSION)['assessment']['questionCount'],count)
+    def test_wrong_or_unknown_manifest_tuple_rejected(self):
+        for fields in (dict(testId='practice-js-13',testVersion=1,questionCount=5),dict(testId='practice-js-5',testVersion=1,questionCount=13),
+                       dict(testId='practice-js-13',testVersion=2,questionCount=13),dict(testId='practice-js-6',testVersion=1,questionCount=6),
+                       dict(testId='practice-js-13',testVersion=True,questionCount=13),dict(testId='practice-js-13',testVersion=1,questionCount='13'),
+                       dict(testId='practice-js-13',testVersion=1.0,questionCount=13),dict(testId='practice-js-13',testVersion=1),dict()):
+            with self.subTest(fields=fields),self.assertRaises(ValueError): validate(self.bundle([],self.manifest(**fields)),SESSION)
+        for schema in (0,3,'2',True):
+            with self.subTest(schema=schema),self.assertRaises(ValueError):
+                validate(self.bundle([],self.manifest(schema,testId='practice-js-13',testVersion=1,questionCount=13)),SESSION)
+    def test_answers_must_match_recording_tuple(self):
+        m=self.manifest(testId='practice-js-13',testVersion=1,questionCount=13)
+        good=self.answers('practice-js-13',1,13)
+        unnamed={k:v for k,v in good.items() if k not in ('testId','testVersion','questionCount')}
+        for bad in (self.answers('practice-js-5',1,5), good|dict(testVersion=2), good|dict(questionCount=5), unnamed,
+                    good|dict(values=['']*12), good|dict(values=['']*14), good|dict(total=5), good|dict(score=14), good|dict(score=-1),
+                    good|dict(grades={'13':{}}), good|dict(grades={'01':{}}), good|dict(grades=[])):
+            with self.subTest(bad={k:bad[k] for k in bad if k!='values'}),self.assertRaises(ValueError): validate(self.bundle([],m,bad),SESSION)
+        five=self.manifest(testId='practice-js-5',testVersion=1,questionCount=5)
+        self.assertEqual(validate(self.bundle([],five,self.answers('practice-js-5',1,5)),SESSION)['assessment']['testId'],'practice-js-5')
+        with self.assertRaises(ValueError): validate(self.bundle([],five,good),SESSION)
     def event(self, **kwargs):
         return dict(id=1,t=1,type='keydown',key='a',code='KeyA',repeat=False,viewport=dict(width=100,height=100),**kwargs)
     def test_valid_key_pairs(self):

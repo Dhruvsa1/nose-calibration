@@ -106,7 +106,7 @@ for (const code of ['intake_command_failed', 'not_a_code', 'constructor', 'toStr
   t.el('intake-refresh').onclick();
   ok(!t.posted.some(p => String(p.command).startsWith('intake-')), 'collector edition never posts intake commands');
   t.send({ kind: 'edition', mode: 'admin' });
-  try { t.send({ kind: 'started', sessionId: 'c'.repeat(32), mode: 'human' }); } catch { /* page rendering stubs are partial */ }
+  try { t.send({ kind: 'started', sessionId: 'c'.repeat(32), mode: 'human', testId: 'practice-js-5', testVersion: 1, questionCount: 5 }); } catch { /* page rendering stubs are partial */ }
   t.el('intake-refresh').onclick();
   ok(!t.posted.some(p => p.command === 'intake-queue'), 'recording blocks intake requests');
 }

@@ -59,7 +59,43 @@ internal class Harness
             }
             int captures=0;await CollectorSessionFiles.WriteSnapshot(folder,"click-00000002.jpg",new byte[]{1,2,3},()=>true,()=>captures++);
             Check(captures==1 && File.Exists(Path.Combine(folder,"click-00000002.jpg")),"current capture commits exactly once");
-            Console.WriteLine("PASS: session validation and immutable ZIP; late capture discarded after stop/session change with no callback or orphan; current capture commits once.");
+            // Test selection: schema 1 maps to the original test; schema 2 must name a known tuple; answers must match it.
+            string tid=new string('c',32),tfolder=Path.Combine(root,tid);Directory.CreateDirectory(tfolder);
+            File.WriteAllText(Path.Combine(tfolder,"summary.json"),JsonSerializer.Serialize(new{eventCount=1L,screenshotCount=0L,mode="human",reason="completed"}));
+            void Manifest(object m)=>File.WriteAllText(Path.Combine(tfolder,"manifest.json"),JsonSerializer.Serialize(m));
+            void Answers(string? json){string p=Path.Combine(tfolder,"answers.json");if(json==null)File.Delete(p);else File.WriteAllText(p,json);}
+            string Named(string testId,int version,int count,int values,int total,int passed)=>JsonSerializer.Serialize(new{testId,testVersion=version,questionCount=count,values=Enumerable.Repeat("",values),grades=Enumerable.Range(0,passed).ToDictionary(i=>i.ToString(),i=>new{passed=true}),score=passed,total});
+            Manifest(new{sessionId=tid,consent=true,schemaVersion=1,mode="human"});Answers("{\"values\":[\"a\",\"b\",\"c\",\"d\",\"e\"],\"total\":5,\"score\":0,\"grades\":{}}");
+            Check(CollectorSessionFiles.ReadCompleted(root,tid).Test==Assessments.Legacy,"legacy manifest maps to the original test");
+            foreach(string bad in new[]{Named("practice-js-13",1,13,13,13,0),"{\"values\":[\"\",\"\",\"\",\"\",\"\",\"\"]}","{\"values\":[],\"total\":13}"})
+                {Answers(bad);Reject(()=>CollectorSessionFiles.ReadCompleted(root,tid),"mismatched answers on legacy recording");}
+            Answers(null);
+            Manifest(new{sessionId=tid,consent=true,schemaVersion=1,mode="human",testId="practice-js-5",testVersion=1,questionCount=5});Reject(()=>CollectorSessionFiles.ReadCompleted(root,tid),"legacy manifest naming a test");
+            foreach(var (testId,version,count) in new[]{("practice-js-5",1,5),("practice-js-13",1,13)})
+            {
+                Manifest(new{sessionId=tid,consent=true,schemaVersion=2,mode="human",testId,testVersion=version,questionCount=count});Answers(Named(testId,version,count,count,count,count));
+                var loaded=CollectorSessionFiles.ReadCompleted(root,tid);Check(loaded.Test.Id==testId && loaded.Test.Version==version && loaded.Test.QuestionCount==count && Assessments.Complete(loaded.Answers!.Value,loaded.Test),"known tuple "+testId);
+            }
+            Answers(null);
+            foreach(var (testId,version,count) in new[]{("practice-js-13",1,5),("practice-js-5",1,13),("practice-js-13",2,13),("practice-js-6",1,6)})
+                {Manifest(new{sessionId=tid,consent=true,schemaVersion=2,mode="human",testId,testVersion=version,questionCount=count});Reject(()=>CollectorSessionFiles.ReadCompleted(root,tid),"wrong tuple "+testId+"/"+version+"/"+count);}
+            Manifest(new{sessionId=tid,consent=true,schemaVersion=2,mode="human",testId="practice-js-13",testVersion="1",questionCount=13});Reject(()=>CollectorSessionFiles.ReadCompleted(root,tid),"string version");
+            Manifest(new{sessionId=tid,consent=true,schemaVersion=2,mode="human"});Reject(()=>CollectorSessionFiles.ReadCompleted(root,tid),"schema 2 without a tuple");
+            Manifest(new{sessionId=tid,consent=true,schemaVersion=3,mode="human",testId="practice-js-13",testVersion=1,questionCount=13});Reject(()=>CollectorSessionFiles.ReadCompleted(root,tid),"unknown schema");
+            Manifest(new{sessionId=tid,consent=true,schemaVersion=2,mode="human",testId="practice-js-13",testVersion=1,questionCount=13});
+            foreach(string bad in new[]{Named("practice-js-5",1,5,5,5,5),Named("practice-js-13",1,13,12,13,0),Named("practice-js-13",1,13,13,5,0),"{\"values\":[]}",Named("practice-js-13",1,13,13,13,1).Replace("\"0\":","\"13\":")})
+                {Answers(bad);Reject(()=>CollectorSessionFiles.ReadCompleted(root,tid),"mismatched answers on 13-question recording");}
+            // Page requests and Admin completion: 13/13 is not 5/5 and vice versa; a client count alone is never trusted.
+            JsonElement Parse(string json)=>JsonDocument.Parse(json).RootElement;
+            Check(Assessments.Require(Parse("{\"testId\":\"practice-js-13\",\"testVersion\":1,\"questionCount\":13}"))==Assessments.Extended,"known request tuple");
+            foreach(string bad in new[]{"{\"testId\":\"practice-js-13\",\"testVersion\":1,\"questionCount\":5}","{\"testId\":\"practice-js-13\",\"testVersion\":1}","{\"questionCount\":13}","{\"testId\":\"practice-js-13\",\"testVersion\":1.5,\"questionCount\":13}"})
+                Reject(()=>Assessments.Require(Parse(bad)),"request tuple "+bad);
+            var full13=Parse(Named("practice-js-13",1,13,13,13,13));var full5=Parse(Named("practice-js-5",1,5,5,5,5));
+            Check(Assessments.Complete(full13,Assessments.Extended) && !Assessments.Complete(full13,Assessments.Legacy),"13/13 completes only the extended test");
+            Check(Assessments.Complete(full5,Assessments.Legacy) && !Assessments.Complete(full5,Assessments.Extended),"5/5 completes only the original test");
+            Check(!Assessments.Complete(Parse(Named("practice-js-13",1,13,13,13,12)),Assessments.Extended),"12 of 13 is not complete");
+            Check(Assessments.Complete(Parse("{\"values\":[],\"grades\":{\"0\":{\"passed\":true},\"1\":{\"passed\":true},\"2\":{\"passed\":true},\"3\":{\"passed\":true},\"4\":{\"passed\":true}},\"score\":5,\"total\":5}"),Assessments.Legacy),"legacy answers without a tuple complete the original test");
+            Console.WriteLine("PASS: session validation and immutable ZIP; late capture discarded after stop/session change with no callback or orphan; current capture commits once; test tuples (legacy mapping, known tuples, mismatches, 13/13 versus 5/5 completion).");
         }
         finally{Directory.Delete(root,true);}
     }

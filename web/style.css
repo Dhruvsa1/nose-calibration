@@ -283,6 +283,44 @@ body:has(#welcome:not([hidden])) .app-main { height: 100%; }
 }
 .landing-chip-note { color: #aeb3b6; font-size: 13px; }
 
+/* Test selection: a ruled list of the fixed assessments. The count is the visual anchor; the
+   chosen test gets a green rail and numeral. Locked (dimmed) while a session or Codex run is active. */
+.test-pick { width: min(100%, 360px); min-width: 0; margin: 26px 0 0; padding: 0; border: 0; }
+.test-pick-label { margin: 0 0 8px; padding: 0; }
+.test-option {
+  position: relative;
+  display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: center; gap: 14px;
+  min-height: 54px; padding: 7px 12px 7px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: background-color 0.16s ease;
+}
+.test-option:last-of-type { border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+.test-option::before {
+  content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px;
+  background: transparent; transition: background-color 0.16s ease;
+}
+.test-option input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.test-count {
+  justify-self: end;
+  color: #64676a;
+  font-family: var(--font-mono); font-size: 24px; font-weight: 600; line-height: 1;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.03em;
+  transition: color 0.16s ease;
+}
+.test-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.test-name { color: #d4d7d5; font-size: 14px; }
+.test-meta { color: #9a9fa1; font-size: 12px; }
+.test-option:hover { background: rgba(255, 255, 255, 0.03); }
+.test-option:has(input:checked)::before { background: var(--green); }
+.test-option:has(input:checked) .test-count { color: var(--green); }
+.test-option:has(input:checked) .test-name { color: var(--text); font-weight: 600; }
+.test-option:has(input:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; }
+.test-option:has(input:disabled) { cursor: default; opacity: 0.55; }
+.test-option:has(input:disabled):hover { background: none; }
+.test-pick-note { margin: 8px 0 0; color: #8f9496; font-size: 12px; }
+.results-test { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+
 /* Earlier recordings: opens a finished session's results screen; never resumes recording. */
 .saved-pick { width: min(100%, 360px); margin-top: 30px; }
 .saved-title { margin: 0 0 8px; font-size: 14px; color: #e6e8e6; }
@@ -920,16 +958,15 @@ details:not([open]) > summary .chev { transform: translateY(-2px) rotate(45deg);
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Ccircle cx='9' cy='9' r='7.6' fill='none' stroke='black' stroke-width='1.4'/%3E%3Cpath d='M5.8 9.2l2.2 2.2 4.2-4.6' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
-/* Section labels above the first question of each section (Basics 1-3, Coding 4-5). */
-.question-link:nth-child(1), .question-link:nth-child(4) { margin-top: 46px; }
-.question-link:nth-child(1)::before, .question-link:nth-child(4)::before {
+/* Section boundaries follow the active assessment's question types. */
+.question-link.section-start { margin-top: 46px; }
+.question-link.section-start::before {
+  content: attr(data-section);
   position: absolute; left: 50%; top: -33px;
   transform: translateX(-50%);
   color: #92928f; font-size: 12.5px; font-weight: 600;
   pointer-events: none;
 }
-.question-link:nth-child(1)::before { content: "S1"; }
-.question-link:nth-child(4)::before { content: "S2"; }
 .question-link:nth-child(1) { margin-top: 42px; }
 
 /* Problem tab gutter */
@@ -1671,6 +1708,8 @@ body { display: flex; flex-direction: column; }
   .landing-title { margin-top: 26px; }
   .landing-label { margin-top: 28px; }
   .saved-pick { margin-top: 22px; }
+  .test-pick { margin-top: 18px; }
+  .test-option { min-height: 46px; padding-top: 4px; padding-bottom: 4px; }
   .landing-chip { height: 58px; }
   .landing-duration { height: 50px; }
   .landing-foot { margin-top: 14px; }
@@ -1694,7 +1733,7 @@ body { display: flex; flex-direction: column; }
   .welcome {
     grid-template-columns: auto minmax(0, 1fr);
     grid-template-areas:
-      "brand brand" "title title" "label label" "chip duration" "saved saved"
+      "brand brand" "title title" "label label" "chip duration" "tests tests" "saved saved"
       "panel panel" "consent consent" "actions actions" "admin admin" "foot foot";
     align-content: start;
     gap: 0 12px;
@@ -1713,6 +1752,7 @@ body { display: flex; flex-direction: column; }
   .landing-actions #start-session { margin-left: auto; }
   .admin { grid-area: admin; }
   .admin-actions { flex-wrap: wrap; }
+  .test-pick { grid-area: tests; width: min(100%, 420px); margin-top: 22px; }
   .saved-pick { grid-area: saved; width: min(100%, 420px); margin-top: 22px; }
   .landing-foot { grid-area: foot; margin-top: 20px; }
 

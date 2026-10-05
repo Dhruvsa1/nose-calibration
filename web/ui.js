@@ -5,11 +5,18 @@
 (() => {
  const $ = id => document.getElementById(id);
  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
- const qs = Array.isArray(window.questions) ? window.questions : [];
+ // The bound session's questions (app.js sets them on start or load); before that, the original list.
+ // Completion marks belong to one session and are cleared when another session is bound.
  const done = new Set();
- const markRail = () => document.querySelectorAll('#question-nav .question-link').forEach((b, i) => b.classList.toggle('q-done', !!qs[i] && done.has(qs[i].id)));
+ let doneFor = null;
+ const qs = () => {
+  const session = window.assessmentSession;
+  if (session !== doneFor) { done.clear(); doneFor = session; }
+  return session?.questions || (Array.isArray(window.questions) ? window.questions : []);
+ };
+ const markRail = () => { const list = qs(); document.querySelectorAll('#question-nav .question-link').forEach((b, i) => b.classList.toggle('q-done', !!list[i] && done.has(list[i].id))); };
  if ($('question-nav')) new MutationObserver(markRail).observe($('question-nav'), { childList: true });
- const currentQuestion = () => { const t = $('problem')?.querySelector('h1')?.textContent; return qs.find(q => q.title === t); };
+ const currentQuestion = () => { const t = $('problem')?.querySelector('h1')?.textContent; return qs().find(q => q.title === t); };
 
  // Admin controls: tabs between the Codex practice run and Submissions. Only [hidden] changes,
  // so the typed Codex instructions, selections and runtime queue rows survive switching.
@@ -39,13 +46,13 @@
 
  // Overview: move Coding rows from the single list app.js renders into the Coding section.
  const basics = $('task-list'), coding = $('task-list-coding');
- if (basics && coding && qs.length) {
+ if (basics && coding) {
   new MutationObserver(() => {
-   const rows = [...basics.children];
-   if (rows.length !== qs.length) return;
-   rows.forEach((row, i) => { if (row.children[2]?.textContent === 'Passed') done.add(qs[i].id); });
+   const rows = [...basics.children], list = qs();
+   if (!list.length || rows.length !== list.length) return;
+   rows.forEach((row, i) => { if (row.children[2]?.textContent === 'Passed') done.add(list[i].id); });
    coding.replaceChildren();
-   rows.forEach((row, i) => { if (qs[i].type === 'Coding') coding.append(row); });
+   rows.forEach((row, i) => { if (list[i].type === 'Coding') coding.append(row); });
   }).observe(basics, { childList: true });
  }
 

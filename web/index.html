@@ -89,6 +89,29 @@
           <span class="landing-chip-note">Only language</span>
         </div>
 
+        <!-- Test selection. app.js reads the checked option only at Start; the host checks the
+             test ID, version and question count, and the session keeps that test until it ends. -->
+        <fieldset id="test-pick" class="test-pick" aria-describedby="test-pick-note">
+          <legend class="landing-label test-pick-label">Choose a test</legend>
+          <label class="test-option" for="test-practice-js-5">
+            <input id="test-practice-js-5" type="radio" name="assessment-choice" value="practice-js-5" checked>
+            <span class="test-count" aria-hidden="true">05</span>
+            <span class="test-text">
+              <span class="test-name">Original practice</span>
+              <span class="test-meta">5 questions &middot; 3 basics &middot; 2 coding</span>
+            </span>
+          </label>
+          <label class="test-option" for="test-practice-js-13">
+            <input id="test-practice-js-13" type="radio" name="assessment-choice" value="practice-js-13">
+            <span class="test-count" aria-hidden="true">13</span>
+            <span class="test-text">
+              <span class="test-name">Extended practice</span>
+              <span class="test-meta">13 questions &middot; 10 multiple choice &middot; 3 coding</span>
+            </span>
+          </label>
+          <p id="test-pick-note" class="test-pick-note">Fixed when you press Start session.</p>
+        </fieldset>
+
         <div class="saved-pick" role="group" aria-labelledby="saved-title">
           <p id="saved-title" class="saved-title">Earlier recordings</p>
           <div class="saved-row">
@@ -390,7 +413,7 @@
               <span class="name-split">Basics Section</span>
               <span class="name-all">Questions</span>
             </span>
-            <span class="section-meta name-split">3 questions</span>
+            <span id="basics-count" class="section-meta name-split">3 questions</span>
             <span class="chev" aria-hidden="true"></span>
           </summary>
           <table class="task-table">
@@ -409,7 +432,7 @@
         <details id="coding-section" class="section" open>
           <summary class="section-head">
             <span class="section-name">Coding Section</span>
-            <span class="section-meta">2 questions</span>
+            <span id="coding-count" class="section-meta">2 questions</span>
             <span class="chev" aria-hidden="true"></span>
           </summary>
           <table class="task-table">
@@ -542,6 +565,7 @@
             <div class="figure-cell">
               <h3 class="figure-label">Score</h3>
               <div id="score-summary" class="summary">Your score appears here once results are ready.</div>
+              <p id="results-test" class="results-test"></p>
             </div>
             <div class="figure-cell">
               <h3 class="figure-label">Session metrics</h3>
